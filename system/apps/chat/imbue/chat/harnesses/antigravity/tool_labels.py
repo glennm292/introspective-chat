@@ -26,6 +26,8 @@ from imbue.chat.harnesses.tool_labels import basename
 from imbue.chat.harnesses.tool_labels import parse_input_preview
 from imbue.chat.harnesses.tool_labels import quoted
 from imbue.chat.harnesses.tool_labels import shorten
+from imbue.chat.harnesses.tool_labels import shorten_command
+from imbue.chat.harnesses.tool_labels import shorten_path
 from imbue.imbue_common.pure import pure
 
 # A target renderer: how a tool's target argument reads in the caption.
@@ -60,9 +62,30 @@ _LABELS: Final[dict[str, tuple[str, str, tuple[str, ...], str]]] = {
     "ask_question": ("Question", "Asking a question", (), _QUOTED),
 }
 
+# The header's past-tense verb, keyed by the shared noun above so all four harnesses
+# describe the same operation with the same word. A noun missing here has no header
+# verb and falls back to naming itself.
+_HEADER_VERB_BY_NOUN: Final[dict[str, str]] = {
+    "Read": "read",
+    "Write": "wrote",
+    "Edit": "edited",
+    "Grep": "searched",
+    "List": "listed",
+    "Bash": "ran",
+    "WebSearch": "searched the web",
+    "WebFetch": "fetched",
+    "ImageGen": "generated an image of",
+    "Glob": "searched",
+    "Task": "managed background task",
+    "Schedule": "scheduled",
+    "Agent": "configured sub-agent",
+    "Message": "messaged",
+    "Question": "asked a question",
+}
+
 # Subagent delegation gets the exact fixed caption claude uses for its Agent/Task tools.
 _SUBAGENT_TOOL_NAMES: Final[frozenset[str]] = frozenset({"invoke_subagent"})
-_SUBAGENT_HEADER: Final[str] = "Tool: Agent"
+_SUBAGENT_HEADER: Final[str] = "delegated to a sub-agent"
 _SUBAGENT_CAPTION: Final[str] = "Delegating to sub-agent…"
 
 _RUN_COMMAND_TOOL_NAME: Final[str] = "run_command"
@@ -91,6 +114,20 @@ def _render_target(value: str, renderer: str) -> str:
 
 
 @pure
+def _render_header_target(value: str, renderer: str) -> str:
+    """The same target, rendered for the wider header row.
+
+    The caption's narrow strip can only afford a basename; the header has room for
+    enough path to locate the file, and for a real command rather than a clipped one.
+    """
+    if renderer == _BASENAME:
+        return shorten_path(value)
+    if renderer == _QUOTED:
+        return quoted(value)
+    return shorten_command(value)
+
+
+@pure
 def tool_labels(tool_name: str, args_json: str, native_caption: str) -> tuple[str, str]:
     """``(header_label, caption_label)`` for one agy tool call.
 
@@ -105,18 +142,48 @@ def tool_labels(tool_name: str, args_json: str, native_caption: str) -> tuple[st
 
     entry = _LABELS.get(tool_name)
     if entry is None:
-        # agy-only or unrecognised tool: agy's own caption reads fine; header names the tool.
-        header = f"Tool: {tool_name}" if tool_name else "Tool"
+        # agy-only or unrecognised tool: agy's own caption reads fine, and with no
+        # known operation the header has nothing better to say than the tool's name.
+        header = tool_name if tool_name else "ran a tool"
         return header, (native_caption or GENERIC_CAPTION)
 
     noun, verb, keys, renderer = entry
-    header = f"Tool: {noun}"
     args = parse_input_preview(args_json)
     target = _first_string_ci(args, keys)
+    header_verb, header_target = header_parts(tool_name, args_json)
+    header = f"{header_verb} {header_target}" if header_target else header_verb
     if target is not None:
         return header, f"{verb} {_render_target(target, renderer)}"
     # No parseable target: prefer agy's own caption over a bare verb.
     return header, (native_caption or f"{verb}…")
+
+
+@pure
+def header_parts(tool_name: str, args_json: str) -> tuple[str, str]:
+    """``(verb, target)`` for the block header: prose verb, then the literal thing.
+
+    Kept apart rather than joined because the view sets them in different type --
+    only the target is machine text.
+    """
+    if tool_name in _SUBAGENT_TOOL_NAMES:
+        return _SUBAGENT_HEADER, ""
+    entry = _LABELS.get(tool_name)
+    if entry is None:
+        return (tool_name if tool_name else "ran a tool"), ""
+    noun, _verb, keys, renderer = entry
+    target = _first_string_ci(parse_input_preview(args_json), keys)
+    verb = _HEADER_VERB_BY_NOUN.get(noun, noun)
+    return verb, (_render_header_target(target, renderer) if target is not None else "")
+
+
+@pure
+def tool_reason(tool_name: str, args_json: str) -> str | None:
+    """agy records no separate reason on a tool call, so this is always None.
+
+    agy does author its own ``toolAction`` phrase, but that is already consumed as
+    the caption; surfacing it again as a reason would print the same sentence twice.
+    """
+    return None
 
 
 @pure

@@ -2,9 +2,9 @@
 
 Codex runs in code mode (pinned via ``features.code_mode_host``), so nearly every
 operation arrives as one ``exec`` tool whose input is a JavaScript program calling
-``tools.<fn>({...})``. ``Tool: exec`` would be a useless header, so for ``exec`` both
+``tools.<fn>({...})``. Naming that outer tool would say nothing, so for ``exec`` both
 labels come from the inner function -- which is why codex needs a translation table
-claude does not (``apply_patch`` -> ``Tool: Edit``).
+claude does not (``apply_patch`` -> ``edited <path>``).
 
 Tool surface and argument shapes, from a live Minds codex agent on codex-cli 0.146.0.
 Re-confirm when CODEX_VERSION moves.
@@ -67,7 +67,7 @@ Re-confirm when CODEX_VERSION moves.
 ``update_plan``, ``request_user_input``, and the three goal tools are unlabelled by design:
 the codex prompt forbids all of them (they write to stores the user cannot see, competing with
 ``tk``), so a sighting is the signal a ban leaked. They fall to the generic label, which names
-the function -- ``Tool: create_goal`` -- making the leak visible instead of dressing it up.
+the function -- ``create_goal`` -- making the leak visible instead of dressing it up.
 """
 
 import re
@@ -77,6 +77,8 @@ from imbue.chat.harnesses.tool_labels import basename
 from imbue.chat.harnesses.tool_labels import mcp_caption
 from imbue.chat.harnesses.tool_labels import quoted
 from imbue.chat.harnesses.tool_labels import shorten
+from imbue.chat.harnesses.tool_labels import shorten_command
+from imbue.chat.harnesses.tool_labels import shorten_path
 from imbue.imbue_common.pure import pure
 
 CODE_MODE_TOOL_NAME = "exec"
@@ -84,7 +86,7 @@ WAIT_TOOL_NAME = "wait"
 
 # An exec program with no parseable tools.<fn> call. Means the JS was unparseable,
 # never "no table entry".
-_UNPARSEABLE_CODE_HEADER = "Tool: Code"
+_UNPARSEABLE_CODE_HEADER = "ran code"
 _UNPARSEABLE_CODE_CAPTION = "Running code"
 
 # tools.<fn> -> (header noun, caption verb). The nouns are ours: code mode reports only
@@ -111,6 +113,23 @@ _APPLY_PATCH_LABELS: dict[str, tuple[str, str]] = {
     "add": ("Write", "Creating"),
     "update": ("Edit", "Editing"),
     "delete": ("Delete", "Deleting"),
+}
+
+# The header's past-tense verb, keyed by the shared noun so all four harnesses
+# describe the same operation with the same word. A noun missing here has no verb
+# to offer and the header falls back to naming the operation.
+_HEADER_VERB_BY_NOUN: dict[str, str] = {
+    "Bash": "ran",
+    "Edit": "edited",
+    "Write": "wrote",
+    "Delete": "deleted",
+    "WriteStdin": "typed into terminal",
+    "ViewImage": "viewed image",
+    "ImageGen": "generated an image of",
+    "WebSearch": "searched the web",
+    "ListMcpResources": "listed MCP resources",
+    "ListMcpResourceTemplates": "listed MCP resource templates",
+    "ReadMcpResource": "read MCP resource",
 }
 # apply_patch takes a backtick template literal, so the filename ends at a real newline
 # when the body arrives raw, or at the ``\n`` escape when it arrives JSON-serialised in
@@ -199,7 +218,26 @@ def _apply_patch_labels(js: str) -> tuple[str, str] | None:
     if match is None:
         return None
     noun, verb = _APPLY_PATCH_LABELS[match.group(1).lower()]
-    return f"Tool: {noun}", f"{verb} {basename(match.group(2).strip())}"
+    path = match.group(2).strip()
+    header_verb = _HEADER_VERB_BY_NOUN.get(noun, noun)
+    return f"{header_verb} {shorten_path(path)}", f"{verb} {basename(path)}"
+
+
+@pure
+def _header_target_for_function(function_name: str, js: str) -> str | None:
+    """The header's target for a ``tools.<fn>`` call: the literal thing it acted on.
+
+    Diverges from the caption's target only where the header's extra width buys
+    something -- the whole command instead of a clipped one, enough path to locate
+    a file instead of a bare basename.
+    """
+    if function_name == "exec_command":
+        command = _js_string_argument(js, "cmd")
+        return shorten_command(command) if command is not None else None
+    if function_name == "view_image":
+        path = _js_string_argument(js, "path")
+        return shorten_path(path) if path is not None else None
+    return _target_for_function(function_name, js)
 
 
 @pure
@@ -217,20 +255,23 @@ def _code_mode_labels(js: str) -> tuple[str, str]:
     if function_name == APPLY_PATCH_FUNCTION_NAME:
         # A body whose header is past the preview leaves the operation unknown; "Editing"
         # is the honest default, since Add and Delete both announce themselves early.
-        return _apply_patch_labels(js) or ("Tool: Edit", "Editing…")
+        return _apply_patch_labels(js) or ("edited a file", "Editing…")
 
     mcp = mcp_caption(function_name)
     if mcp is not None:
-        return f"Tool: {function_name}", mcp
+        return f"called {mcp.removeprefix('Running ')}", mcp
 
     labels = _LABELS_BY_FUNCTION.get(function_name)
     if labels is None:
-        return f"Tool: {function_name}", GENERIC_CAPTION
+        return function_name, GENERIC_CAPTION
     noun, verb = labels
 
     target = _target_for_function(function_name, js)
     caption = f"{verb} {target}" if target is not None else f"{verb}…"
-    return f"Tool: {noun}", caption
+    header_verb = _HEADER_VERB_BY_NOUN.get(noun, noun)
+    header_target = _header_target_for_function(function_name, js)
+    header = f"{header_verb} {header_target}" if header_target is not None else header_verb
+    return header, caption
 
 
 @pure
@@ -283,5 +324,63 @@ def tool_labels(tool_name: str, input_preview: str) -> tuple[str, str]:
     if tool_name == CODE_MODE_TOOL_NAME:
         return _code_mode_labels(input_preview)
     if tool_name == WAIT_TOOL_NAME:
-        return "Tool: Wait", "Waiting for code…"
-    return (f"Tool: {tool_name}" if tool_name else "Tool"), GENERIC_CAPTION
+        return "waited for code", "Waiting for code…"
+    return (tool_name if tool_name else "ran a tool"), GENERIC_CAPTION
+
+
+@pure
+def header_parts(tool_name: str, input_preview: str) -> tuple[str, str]:
+    """``(verb, target)`` for the block header: prose verb, then the literal thing.
+
+    Kept apart rather than joined because the view sets them in different type --
+    only the target is machine text. Derived from the same header the joined label
+    uses, split at its first space where the verb is a single word and re-derived
+    from the tables otherwise.
+    """
+    if tool_name == CODE_MODE_TOOL_NAME:
+        return _code_mode_header_parts(input_preview)
+    if tool_name == WAIT_TOOL_NAME:
+        return "waited for code", ""
+    return (tool_name if tool_name else "ran a tool"), ""
+
+
+@pure
+def _code_mode_header_parts(js: str) -> tuple[str, str]:
+    """``(verb, target)`` for an ``exec`` call, from the ``tools.<fn>`` it wraps."""
+    call_match = _CODE_MODE_CALL_RE.search(js)
+    if call_match is None:
+        patch = _apply_patch_header_parts(js)
+        return patch if patch is not None else (_UNPARSEABLE_CODE_HEADER, "")
+    function_name = call_match.group(1)
+    if function_name == APPLY_PATCH_FUNCTION_NAME:
+        patch = _apply_patch_header_parts(js)
+        return patch if patch is not None else ("edited a file", "")
+    mcp = mcp_caption(function_name)
+    if mcp is not None:
+        return f"called {mcp.removeprefix('Running ')}", ""
+    labels = _LABELS_BY_FUNCTION.get(function_name)
+    if labels is None:
+        return function_name, ""
+    noun, _verb = labels
+    target = _header_target_for_function(function_name, js)
+    return _HEADER_VERB_BY_NOUN.get(noun, noun), target or ""
+
+
+@pure
+def _apply_patch_header_parts(js: str) -> tuple[str, str] | None:
+    """``(verb, path)`` for an ``apply_patch`` body, or None with no file header."""
+    match = _APPLY_PATCH_HEADER_RE.search(js)
+    if match is None:
+        return None
+    noun, _verb = _APPLY_PATCH_LABELS[match.group(1).lower()]
+    return _HEADER_VERB_BY_NOUN.get(noun, noun), shorten_path(match.group(2).strip())
+
+
+@pure
+def tool_reason(tool_name: str, input_preview: str) -> str | None:
+    """codex records no separate reason on a tool call, so this is always None.
+
+    Under code mode a call is a JS program; there is no description field anywhere
+    in it, and the program text is already what the header shows.
+    """
+    return None

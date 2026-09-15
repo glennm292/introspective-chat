@@ -157,6 +157,15 @@ export interface TranscriptScrollEngine {
   /** Viewport currently sits over a virtual end spacer (show the loading overlay). */
   isViewportInSpacer(): boolean;
 
+  /** Put the viewport on `eventIndex`, loading that region when it is not resident.
+   *
+   * The navigation rail's counterpart to dragging the scrollbar into unloaded
+   * history: the same pendingJumpIndex machinery (the fill planner focuses the
+   * index, the landing anchors on it), without pretending a pointer gesture
+   * happened. Resident targets are left alone -- the caller scrolls to the row
+   * itself, which it can place far more precisely than an index can. */
+  jumpToEventIndex(eventIndex: number): void;
+
   // Custom scrollbar contract (see TranscriptScrollbar).
   scrollbarEngage(): void;
   scrollbarMoveTo(fraction: number): void;
@@ -1452,6 +1461,77 @@ export function createTranscriptScrollEngine(config: TranscriptScrollEngineConfi
         frozenThumbSizeFraction = computeThumb(mappingAtEngage, viewportNow(), physicalHeightPx()).sizeFraction;
         trace?.record("scrollbar-engage", { mapping: mappingAtEngage });
       }
+    },
+
+    jumpToEventIndex(eventIndex: number): void {
+      if (scrollEl === null) {
+        return;
+      }
+      const totalEvents = dataSource.getTotalEvents();
+      const { firstIndex, endIndex } = extent();
+      const index = Math.max(0, totalEvents === null ? eventIndex : Math.min(eventIndex, totalEvents - 1));
+      // Resident in the loaded window, but not necessarily MOUNTED: the window is
+      // far larger than the rendered range, so most resident rows have no DOM at
+      // all. Nothing to fetch, but the viewport still has to move there before the
+      // virtualizer will mount the row -- and only the engine knows where "there"
+      // is, since row positions come from its own geometry.
+      if (index >= firstIndex && index < endIndex) {
+        if (geometry === null) {
+          return;
+        }
+        const rowIndex = rowIndexForEventIndex(rowEventIndexes, index);
+        if (rowIndex < 0) {
+          return;
+        }
+        lastActivityAtMs = performance.now();
+        writeScrollTop(scrollEl, spacerTopPx + geometry.rowTops[rowIndex], "outline-jump");
+        // ORDER IS LOAD-BEARING. The anchor must describe where we just moved TO,
+        // not where we came from: afterRender re-derives scrollTop from the stored
+        // anchor on the next frame ("anchor-hold"), so anchoring before the write
+        // makes the engine dutifully undo the jump. Anchoring the target row at
+        // offset 0 is exactly the position just written.
+        //
+        // Same boundary rule as the jump landing: never anchor the window's first
+        // row while older history remains, since it absorbs prepends under a
+        // stable key.
+        const useInteriorRow = rowIndex === 0 && firstIndex > 0 && geometryRows.length >= 2;
+        const anchorRowIndex = useInteriorRow ? 1 : rowIndex;
+        dispatchPosition({
+          kind: "USER_SCROLLED",
+          source: "scrollbar",
+          anchor: {
+            rowKey: geometryRows[anchorRowIndex].key,
+            offsetPx: geometry.rowTops[anchorRowIndex] - geometry.rowTops[rowIndex],
+          },
+          atTail: false,
+        });
+        m.redraw();
+        return;
+      }
+      lastActivityAtMs = performance.now();
+      pendingJumpIndex = index;
+      // Move into the spacer straight away so the jump feels immediate (the
+      // loading overlay covers it); the planner lands the window and the
+      // JUMPED_TO_INDEX dispatch anchors on the target row.
+      const total = totalEvents ?? endIndex;
+      if (index < firstIndex && firstIndex > 0 && spacerTopPx > 0) {
+        writeScrollTop(scrollEl, (index / firstIndex) * spacerTopPx, "outline-jump");
+      } else if (index >= endIndex && total > endIndex && spacerBottomPx > 0) {
+        const intoFraction = (index - endIndex) / (total - endIndex);
+        writeScrollTop(scrollEl, spacerTopPx + physicalHeightPx() + intoFraction * spacerBottomPx, "outline-jump");
+      }
+      // Leave FOLLOW before the fill lands: while it holds, the tail pin drags
+      // the viewport straight back to the bottom.
+      pendingTailIntent = total > 0 && index >= total - 1;
+      pendingTopIntent = index <= 0;
+      if (positionState.kind === "FOLLOW" && geometry !== null) {
+        const anchor = anchorForUser();
+        if (anchor !== null) {
+          dispatchPosition({ kind: "USER_SCROLLED", source: "scrollbar", anchor, atTail: false });
+        }
+      }
+      planFill();
+      m.redraw();
     },
 
     scrollbarMoveTo(fraction: number): void {

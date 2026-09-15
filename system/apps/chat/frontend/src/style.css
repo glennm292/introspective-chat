@@ -119,6 +119,27 @@
   line-height: 1.55;
 }
 
+/* The REAL tool-call block (ToolCallBlock.ts) draws its own pane chrome -- border,
+   background, padding -- so the generic markdown `pre` styling above would paint a
+   second box inside the first. Neutralise it for the block's own panes only; the
+   markdown variant's direct-child pre still wants it. */
+.markdown-content .tool-call-preview pre,
+.markdown-content .tool-call-details pre {
+  margin: 0;
+  padding: 0;
+  background-color: transparent;
+  border: 0;
+  border-radius: 0;
+  overflow-x: visible;
+}
+
+/* `.markdown-content pre code` resets the inline-code background but not its
+   border, which would outline every line of a result pane. */
+.markdown-content .tool-call-preview pre code,
+.markdown-content .tool-call-details pre code {
+  border: 0;
+}
+
 .markdown-content blockquote {
   margin-top: 0.75em;
   margin-bottom: 0.75em;
@@ -141,13 +162,18 @@
   margin-bottom: 0.75em;
 }
 
-.markdown-content .tool-call-block pre {
+/* The MARKDOWN variant only: a fenced block that markdown.ts wrapped, whose pre is
+   the wrapper's DIRECT child. The real tool-call block (ToolCallBlock.ts) nests its
+   panes one level deeper, and these rules must not reach them -- the chevron
+   pseudo-element and the one-line clamp below would put a second arrow on every
+   result pane and squash the preview to a single line. */
+.markdown-content .tool-call-block > pre {
   margin: 0;
   padding-left: 28px;
   position: relative;
 }
 
-.markdown-content .tool-call-block pre::before {
+.markdown-content .tool-call-block > pre::before {
   content: "▸";
   position: absolute;
   left: 10px;
@@ -160,15 +186,15 @@
   pointer-events: none;
 }
 
-.markdown-content .tool-call-block--expanded pre::before {
+.markdown-content .tool-call-block--expanded > pre::before {
   transform: rotate(90deg);
 }
 
-.markdown-content .tool-call-block pre code {
+.markdown-content .tool-call-block > pre code {
   display: block;
 }
 
-.markdown-content .tool-call-block:not(.tool-call-block--expanded) pre code {
+.markdown-content .tool-call-block:not(.tool-call-block--expanded) > pre code {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -543,4 +569,39 @@
 .transcript-scrollbar:hover .transcript-scrollbar-thumb,
 .transcript-scrollbar-shown .transcript-scrollbar-thumb {
   background: color-mix(in srgb, var(--c-text-secondary) 55%, transparent);
+}
+
+/* --- Transcript navigation rail (views/TranscriptOutline.ts) --------------- */
+
+/* The rail's width. The composer no longer needs an inset to match it: the rail
+   now runs the full height of the pane and the composer sits inside the column
+   beside it, so they line up structurally. */
+:root {
+  --width-chat-rail: 236px;
+}
+
+/* The current entry: the message you are looking at. Tinted rather than outlined
+   so a rail full of entries still reads as one list. */
+.transcript-outline-entry--current {
+  background-color: var(--c-bg-accent-subtle, rgba(122, 162, 247, 0.16));
+  color: var(--c-text-primary);
+}
+
+/* The lean: the agent's entries carry the marker on the left, yours on the right,
+   echoing which side each message sits on in the transcript itself. */
+.transcript-outline-entry--agent.transcript-outline-entry--current {
+  box-shadow: inset 2px 0 0 var(--c-accent, #7aa2f7);
+}
+.transcript-outline-entry--user.transcript-outline-entry--current {
+  box-shadow: inset -2px 0 0 var(--c-accent, #7aa2f7);
+}
+
+/* Two lines exactly, with the overflow cut rather than faded: an entry is a
+   label, and a fade would suggest there is more to read in the rail. */
+.transcript-outline-text {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  word-break: break-word;
 }

@@ -32,6 +32,12 @@ every parser:
 - **Error snippets.** A failed call must stay glanceable without a fetch, so
   :func:`error_snippet` keeps its first line resident -- except for a call a Claude Code hook
   refused, which gets no snippet (the workspace steering the agent is not a fault to flag).
+
+- **Output previews.** Every call -- not just a failed one -- shows its opening lines
+  under the collapsed block, so a row says what came back rather than only what ran.
+  :func:`output_preview` keeps those few lines resident. This is a deliberate, bounded
+  exception to the payload-free rule above: a handful of lines per call, with the whole
+  output still fetched on demand when the row is expanded.
 """
 
 import json
@@ -45,6 +51,8 @@ from tk_command_parsing.parser import parse_command
 
 from imbue.chat.harnesses.events import DisplayKind
 from imbue.chat.harnesses.events import MAX_ERROR_SNIPPET_LENGTH
+from imbue.chat.harnesses.events import MAX_OUTPUT_PREVIEW_LENGTH
+from imbue.chat.harnesses.events import MAX_OUTPUT_PREVIEW_LINES
 from imbue.chat.harnesses.events import MAX_TK_STAMP_LENGTH
 from imbue.imbue_common.frozen_model import FrozenModel
 
@@ -221,6 +229,29 @@ def tk_stamp(content: str) -> str:
 # The tool half admits hyphens: MCP tools arrive as ``mcp__<server>__<tool>`` and their names may
 # carry them.
 _HOOK_BLOCK_ERROR_RE: Final[re.Pattern[str]] = re.compile(r"^\w+(?::[\w-]+)? hook error:")
+
+
+def output_preview(content: str) -> str:
+    """The opening lines of a call's output, kept resident so the block shows a result.
+
+    The wire is otherwise payload-free (see the module docstring): a tool's output
+    stays on disk until the row is expanded. That is what makes a long conversation
+    cheap to load, and it is deliberately NOT undone here -- this keeps only enough
+    to answer "what came back" at a glance, and expanding still fetches the whole
+    output. Trailing blank lines are dropped so the preview does not render as an
+    empty pane when a command's output starts with them.
+    """
+    lines = content.splitlines()
+    kept: list[str] = []
+    for line in lines:
+        if not kept and not line.strip():
+            continue
+        kept.append(line)
+        if len(kept) >= MAX_OUTPUT_PREVIEW_LINES:
+            break
+    while kept and not kept[-1].strip():
+        kept.pop()
+    return "\n".join(kept)[:MAX_OUTPUT_PREVIEW_LENGTH]
 
 
 def error_snippet(content: str) -> str:

@@ -1,24 +1,31 @@
 """Human labels for a tool call, computed where the harness is already known.
 
-Every tool call a parser emits carries two strings:
+Every tool call a parser emits carries two strings, plus an optional third:
 
-- ``header_label``  -- the tool's identity, for the transcript block header
-- ``caption_label`` -- verb + target, for the live activity strip
+- ``header_label``  -- what the call actually DID, for the transcript block
+  header: a past-tense verb and the thing it acted on (``ran sha256sum …``,
+  ``read scripts/run.py``). It deliberately does NOT name the tool: the tool's
+  identity is an implementation detail, and a header that reads ``Tool: Bash``
+  tells the reader nothing they wanted to know.
+- ``caption_label`` -- verb + target, for the live activity strip. Present tense
+  and narrower, because it describes a call still in flight (``Reading foo.py``).
+- ``reason_label`` -- the agent's OWN stated reason for making the call, when the
+  tool records one. Only some tools do (a shell command's ``description``, a
+  delegation's), so this is None far more often than not, and a missing reason is
+  rendered as nothing rather than guessed at.
 
 They are computed HERE, in the harness's own parser, rather than in the frontend.
 The frontend renders whichever it needs and so has to know nothing about which
 harness produced the event -- which matters most for codex, where code mode names
 every operation ``exec`` and buries the real one in a JavaScript argument.
 
-The two strings differ for claude (``Tool: Read`` / ``Reading foo.py``) and are
-usually equal for codex, whose header would otherwise read a useless ``Tool: exec``.
-
-This module holds only the pieces both harnesses share; the per-harness tables
-live in :mod:`tool_labels` and :mod:`tool_labels`.
+This module holds only the pieces every harness shares; the per-harness verb
+tables live in each harness's own ``tool_labels`` module.
 """
 
 import json
 import re
+from collections.abc import Mapping
 from typing import Any
 
 from imbue.imbue_common.pure import pure
@@ -27,7 +34,20 @@ from imbue.imbue_common.pure import pure
 # before the strip would wrap.
 MAX_TARGET_LENGTH = 60
 
+# The block header is a full-width row rather than a narrow strip, so it can carry
+# a real shell command -- but it is still one line that must not wrap.
+MAX_HEADER_TARGET_LENGTH = 110
+
+# A stated reason is one sentence above the block; longer than that is prose the
+# agent should have put in its message instead.
+MAX_REASON_LENGTH = 200
+
 GENERIC_CAPTION = "Running tool…"
+
+# The input key an agent states its reason in. Claude's Bash and Agent tools both
+# use ``description``; the other harnesses' equivalents are mapped onto it in
+# their own modules.
+REASON_INPUT_KEY = "description"
 
 _MCP_PREFIX = "mcp__"
 _MCP_SEPARATOR = "__"
@@ -96,3 +116,52 @@ def first_string_value(source: dict[str, Any], *keys: str) -> str | None:
         if isinstance(value, str) and value:
             return value
     return None
+
+
+# How many trailing path segments a header keeps. Three is enough to tell two
+# same-named files apart in practice, and short enough that an absolute path from
+# the filesystem root does not swamp the row.
+_HEADER_PATH_SEGMENTS = 3
+
+
+@pure
+def shorten_path(path: str, max_length: int = MAX_HEADER_TARGET_LENGTH) -> str:
+    """A path trimmed to its informative tail: the last few segments.
+
+    ``shorten`` keeps the head, which is right for prose and wrong for a path:
+    clipping ``system/apps/chat/frontend/src/views/ToolCallBlock.ts`` from the
+    right would leave the reader with the directory and no file. Trimming by
+    segment rather than by character also means the result is always a readable
+    path fragment rather than a string cut mid-name.
+    """
+    collapsed = re.sub(r"\s+", " ", path).strip()
+    segments = [segment for segment in collapsed.split("/") if segment]
+    if len(segments) > _HEADER_PATH_SEGMENTS:
+        collapsed = ".../" + "/".join(segments[-_HEADER_PATH_SEGMENTS:])
+    if len(collapsed) <= max_length:
+        return collapsed
+    return "…" + collapsed[-(max_length - 1) :]
+
+
+@pure
+def shorten_command(command: str, max_length: int = MAX_HEADER_TARGET_LENGTH) -> str:
+    """A shell command as one header line: newlines collapsed, clipped from the right.
+
+    The head is what identifies a command (the program and its first arguments),
+    so unlike a path this clips from the right.
+    """
+    return shorten(command, max_length)
+
+
+@pure
+def stated_reason(tool_input: Mapping[str, Any]) -> str | None:
+    """The agent's own reason for this call, or None when the tool records none.
+
+    Deliberately never inferred. A tool whose input has no reason field (every
+    file read, edit, and write) yields None, and the reason line is then simply
+    absent -- a guessed reason would be worse than no reason at all.
+    """
+    value = tool_input.get(REASON_INPUT_KEY)
+    if not isinstance(value, str) or not value.strip():
+        return None
+    return shorten(value, MAX_REASON_LENGTH)

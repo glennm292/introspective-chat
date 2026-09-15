@@ -247,7 +247,7 @@ def test_labels_read_the_full_input() -> None:
         "payload": {"type": "function_call", "call_id": "c1", "name": "exec", "arguments": js},
     }
     tc = parse_lines(call, 1, {})[0]["tool_calls"][0]
-    assert tc["header_label"] == "Tool: Write"
+    assert tc["header_label"] == "wrote newfile.py"
     # Payload-free wire: the input never rides the event; its size drives the expand.
     assert "input_preview" not in tc
     assert tc["input_chars"] == len(js)

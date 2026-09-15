@@ -4,48 +4,49 @@ from __future__ import annotations
 
 from imbue.chat.harnesses.antigravity.tool_labels import shell_command
 from imbue.chat.harnesses.antigravity.tool_labels import tool_labels
+from imbue.chat.harnesses.antigravity.tool_labels import tool_reason
 
 
 def test_run_command_reads_like_bash() -> None:
     header, caption = tool_labels(
         "run_command", '{"CommandLine":"python3 showcase.py"}', "Running python3 showcase.py"
     )
-    assert header == "Tool: Bash"
+    assert header == "ran python3 showcase.py"
     assert caption == "Running python3 showcase.py"
 
 
 def test_edit_uses_basename_target() -> None:
     header, caption = tool_labels("replace_file_content", '{"TargetFile":"/home/user/showcase.py"}', "ignored")
-    assert header == "Tool: Edit"
+    assert header == "edited /home/user/showcase.py"
     assert caption == "Editing showcase.py"
 
 
 def test_write_reads_like_write() -> None:
     header, caption = tool_labels("write_to_file", '{"TargetFile":"/a/b/notes.md","CodeContent":"..."}', "x")
-    assert (header, caption) == ("Tool: Write", "Writing notes.md")
+    assert (header, caption) == ("wrote /a/b/notes.md", "Writing notes.md")
 
 
 def test_grep_quotes_the_query() -> None:
     header, caption = tool_labels("grep_search", '{"Query":"magic"}', "Grep search showcase.py")
-    assert header == "Tool: Grep"
+    assert header == 'searched "magic"'
     assert caption == 'Searching "magic"'
 
 
 def test_list_dir_diverges_naturally() -> None:
     header, caption = tool_labels("list_dir", '{"DirectoryPath":"/home/user"}', "Listing directory /home/user")
-    assert (header, caption) == ("Tool: List", "Listing user")
+    assert (header, caption) == ("listed /home/user", "Listing user")
 
 
 def test_web_search_matches_codex_phrase() -> None:
     # agy's real search_web uses a lowercase "query" key (grep_search uses "Query");
     # the label match is case-insensitive so both read the same.
     header, caption = tool_labels("search_web", '{"query":"gemini docs"}', "Web search")
-    assert (header, caption) == ("Tool: WebSearch", 'Searching the web "gemini docs"')
+    assert (header, caption) == ('searched the web "gemini docs"', 'Searching the web "gemini docs"')
 
 
 def test_invoke_subagent_matches_claude_fixed_caption() -> None:
     header, caption = tool_labels("invoke_subagent", '{"Name":"researcher"}', "x")
-    assert (header, caption) == ("Tool: Agent", "Delegating to sub-agent…")
+    assert (header, caption) == ("delegated to a sub-agent", "Delegating to sub-agent…")
 
 
 def test_unmapped_agy_only_tool_falls_back_to_native_caption() -> None:
@@ -54,25 +55,31 @@ def test_unmapped_agy_only_tool_falls_back_to_native_caption() -> None:
     one would stop exercising this path the moment the table caught up (which is exactly what
     happened to ``schedule``)."""
     header, caption = tool_labels("some_future_tool", '{"Whatever":"x"}', "Doing a new thing")
-    assert header == "Tool: some_future_tool"
+    assert header == "some_future_tool"
     assert caption == "Doing a new thing"
 
 
 def test_the_rest_of_agys_declared_tools_are_mapped_to_shared_vocabulary() -> None:
-    """Every tool agy declares has a header noun. Without these the header read
-    "Tool: manage_task" and the caption fell through to the generic placeholder."""
-    assert tool_labels("find_by_name", '{"Pattern":"*.py"}', "")[0] == "Tool: Glob"
-    assert tool_labels("manage_task", '{"Action":"list"}', "")[0] == "Tool: Task"
-    assert tool_labels("schedule", '{"Prompt":"digest"}', "")[0] == "Tool: Schedule"
-    assert tool_labels("define_subagent", '{"name":"researcher"}', "")[0] == "Tool: Agent"
-    assert tool_labels("manage_subagents", '{"Action":"list"}', "")[0] == "Tool: Agent"
-    assert tool_labels("send_message", '{"Recipient":"conv-1"}', "")[0] == "Tool: Message"
-    assert tool_labels("ask_question", "{}", "")[0] == "Tool: Question"
+    """Every tool agy declares gets a real verb. Without these the header named the raw
+    tool and the caption fell through to the generic placeholder."""
+    assert tool_labels("find_by_name", '{"Pattern":"*.py"}', "")[0] == 'searched "*.py"'
+    assert tool_labels("manage_task", '{"Action":"list"}', "")[0] == 'managed background task "list"'
+    assert tool_labels("schedule", '{"Prompt":"digest"}', "")[0] == 'scheduled "digest"'
+    assert tool_labels("define_subagent", '{"name":"researcher"}', "")[0] == 'configured sub-agent "researcher"'
+    assert tool_labels("manage_subagents", '{"Action":"list"}', "")[0] == 'configured sub-agent "list"'
+    assert tool_labels("send_message", '{"Recipient":"conv-1"}', "")[0] == 'messaged "conv-1"'
+    assert tool_labels("ask_question", "{}", "")[0] == "asked a question"
+
+
+def test_agy_states_no_reason_on_any_tool() -> None:
+    """agy's own toolAction phrase is already the caption; repeating it as a reason
+    would print the same sentence twice."""
+    assert tool_reason("run_command", '{"CommandLine":"ls"}') is None
 
 
 def test_no_target_and_no_native_caption_uses_bare_verb() -> None:
     header, caption = tool_labels("run_command", "{}", "")
-    assert header == "Tool: Bash"
+    assert header == "ran"
     assert caption == "Running…"
 
 

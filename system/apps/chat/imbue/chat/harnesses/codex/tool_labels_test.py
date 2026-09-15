@@ -3,6 +3,7 @@ import pytest
 from imbue.chat.harnesses.codex.tool_labels import CODE_MODE_TOOL_NAME
 from imbue.chat.harnesses.codex.tool_labels import shell_command
 from imbue.chat.harnesses.codex.tool_labels import tool_labels
+from imbue.chat.harnesses.codex.tool_labels import tool_reason
 
 
 @pytest.mark.parametrize(
@@ -11,52 +12,52 @@ from imbue.chat.harnesses.codex.tool_labels import tool_labels
         pytest.param(
             "exec",
             'const r = await tools.exec_command({"cmd":"uv run pytest"}); text(r.output);',
-            ("Tool: Bash", "Running uv run pytest"),
+            ("ran uv run pytest", "Running uv run pytest"),
             id="exec_command",
         ),
         pytest.param(
             "exec",
             'await tools.web__run({"q":"codex sdk"})',
-            ("Tool: WebSearch", 'Searching the web "codex sdk"'),
+            ('searched the web "codex sdk"', 'Searching the web "codex sdk"'),
             id="web__run",
         ),
         pytest.param(
             "exec",
             'await tools.view_image({"path":"/home/user/diagram.png"})',
-            ("Tool: ViewImage", "Viewing image diagram.png"),
+            ("viewed image /home/user/diagram.png", "Viewing image diagram.png"),
             id="view_image",
         ),
         pytest.param(
             "exec",
             'await tools.write_stdin({"chars":"y\\n"})',
-            ("Tool: WriteStdin", "Typing into terminal…"),
+            ("typed into terminal", "Typing into terminal…"),
             id="write_stdin_no_target",
         ),
         pytest.param(
             "exec",
             'await tools.image_gen__imagegen({"prompt":"a cat wearing a hat"})',
-            ("Tool: ImageGen", 'Generating an image "a cat wearing a hat"'),
+            ('generated an image of "a cat wearing a hat"', 'Generating an image "a cat wearing a hat"'),
             id="image_gen",
         ),
         pytest.param(
             "exec",
             'await tools.read_mcp_resource({"server":"codex_apps","uri":"file:///docs/api.md"})',
-            ("Tool: ReadMcpResource", "Reading MCP resource file:///docs/api.md"),
+            ("read MCP resource file:///docs/api.md", "Reading MCP resource file:///docs/api.md"),
             id="read_mcp_resource",
         ),
         pytest.param(
             "exec",
             'await tools.list_mcp_resources({"server":"codex_apps"})',
-            ("Tool: ListMcpResources", "Listing MCP resources on codex_apps"),
+            ("listed MCP resources on codex_apps", "Listing MCP resources on codex_apps"),
             id="list_mcp_resources",
         ),
         pytest.param(
             "exec",
             'await tools.mcp__codex_apps__gmail_search_emails({"query":"is:unread"})',
-            ("Tool: mcp__codex_apps__gmail_search_emails", "Running gmail search emails"),
+            ("called gmail search emails", "Running gmail search emails"),
             id="mcp_server_tool",
         ),
-        pytest.param("wait", "", ("Tool: Wait", "Waiting for code…"), id="wait_is_top_level"),
+        pytest.param("wait", "", ("waited for code", "Waiting for code…"), id="wait_is_top_level"),
     ],
 )
 def test_codex_tool_labels(tool_name: str, input_preview: str, expected: tuple[str, str]) -> None:
@@ -66,9 +67,9 @@ def test_codex_tool_labels(tool_name: str, input_preview: str, expected: tuple[s
 @pytest.mark.parametrize(
     ("operation", "expected"),
     [
-        pytest.param("Add File: hello.txt", ("Tool: Write", "Creating hello.txt"), id="add"),
-        pytest.param("Update File: a/b/plugin.py", ("Tool: Edit", "Editing plugin.py"), id="update"),
-        pytest.param("Delete File: a/b/gone.txt", ("Tool: Delete", "Deleting gone.txt"), id="delete"),
+        pytest.param("Add File: hello.txt", ("wrote hello.txt", "Creating hello.txt"), id="add"),
+        pytest.param("Update File: a/b/plugin.py", ("edited a/b/plugin.py", "Editing plugin.py"), id="update"),
+        pytest.param("Delete File: a/b/gone.txt", ("deleted a/b/gone.txt", "Deleting gone.txt"), id="delete"),
     ],
 )
 def test_apply_patch_labels_name_the_operation(operation: str, expected: tuple[str, str]) -> None:
@@ -85,7 +86,7 @@ def test_apply_patch_is_gated_on_the_function_not_the_string() -> None:
     """
     preview = 'tools.exec_command({"cmd":"grep -n \'*** Add File: x\' notes.txt"})'
     header, caption = tool_labels("exec", preview)
-    assert header == "Tool: Bash"
+    assert header.startswith("ran grep")
     assert caption.startswith("Running grep")
 
 
@@ -96,7 +97,10 @@ def test_apply_patch_is_found_even_when_the_call_is_past_the_truncation() -> Non
     every edit would read "Running code".
     """
     preview = 'const p = "*** Begin Patch\\n*** Update File: system/apps/system_interface/plugin.py\\n@@ -1'
-    assert tool_labels("exec", preview) == ("Tool: Edit", "Editing plugin.py")
+    assert tool_labels("exec", preview) == (
+        "edited .../apps/system_interface/plugin.py",
+        "Editing plugin.py",
+    )
 
 
 @pytest.mark.parametrize(
@@ -107,8 +111,8 @@ def test_apply_patch_is_found_even_when_the_call_is_past_the_truncation() -> Non
     ],
 )
 def test_unparseable_code_mode_falls_back_rather_than_guessing(input_preview: str) -> None:
-    """``Tool: Code`` means exactly one thing: no tools.<fn> call could be parsed."""
-    assert tool_labels("exec", input_preview) == ("Tool: Code", "Running code")
+    """``ran code`` means exactly one thing: no tools.<fn> call could be parsed."""
+    assert tool_labels("exec", input_preview) == ("ran code", "Running code")
 
 
 @pytest.mark.parametrize(
@@ -126,10 +130,10 @@ def test_unrecognised_function_is_named_rather_than_hidden(function_name: str) -
 
     This is what makes a prompt-banned tool (update_plan, the goal trio) visible in the
     UI the moment it leaks, and a stale table self-reporting -- collapsing these to
-    "Tool: Code" would hide both.
+    "ran code" would hide both.
     """
     header, caption = tool_labels("exec", f'await tools.{function_name}({{"a":1}})')
-    assert header == f"Tool: {function_name}"
+    assert header == function_name
     assert caption == "Running tool…"
 
 
@@ -147,15 +151,20 @@ def test_prompt_banned_tools_are_deliberately_uncased(tool_name: str) -> None:
     the ban leaked -- a tailored caption would hide that.
     """
     header_label, caption_label = tool_labels(tool_name, "{}")
-    assert header_label == f"Tool: {tool_name}"
+    assert header_label == tool_name
     assert caption_label == "Running tool…"
 
 
-def test_mcp_tool_keeps_its_raw_name_in_the_header() -> None:
+def test_mcp_tool_reads_as_a_call_rather_than_a_raw_symbol() -> None:
     """Matches how claude renders MCP calls, so the two harnesses read alike."""
     header_label, caption_label = tool_labels("exec", "await tools.mcp__deepwiki__ask_question({})")
-    assert header_label == "Tool: mcp__deepwiki__ask_question"
+    assert header_label == "called ask question"
     assert caption_label == "Running ask question"
+
+
+def test_codex_states_no_reason_on_any_call() -> None:
+    """A code-mode call is a JS program with no description field anywhere in it."""
+    assert tool_reason("exec", 'await tools.exec_command({"cmd":"ls"})') is None
 
 
 def test_a_long_command_is_shortened() -> None:

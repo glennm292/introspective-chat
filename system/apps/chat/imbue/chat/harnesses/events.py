@@ -46,6 +46,12 @@ SPECIAL_EVENT_TYPE: Final[str] = "special"
 # and ``tk_command`` (the step progress view's facts), ``permission_request`` (the card's
 # structured object), and ``has_thinking``.
 MAX_ERROR_SNIPPET_LENGTH: Final[int] = 200
+# Ceiling on the resident output preview -- the opening lines of a call's result, shown
+# under the collapsed block so a row says what came back without a fetch. Small on
+# purpose: this rides EVERY tool result, so it is sized to answer "what happened" at a
+# glance, not to replace the on-demand fetch of the whole output.
+MAX_OUTPUT_PREVIEW_LINES: Final[int] = 4
+MAX_OUTPUT_PREVIEW_LENGTH: Final[int] = 400
 # Ceiling on the resident tk stamp. tk decoration is a handful of short lines per call;
 # the cap only guards against pathological output that happens to be full of step-id
 # tokens.

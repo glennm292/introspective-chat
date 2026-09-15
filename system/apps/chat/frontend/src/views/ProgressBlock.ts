@@ -16,11 +16,12 @@ import { MarkdownContent, renderMarkdown } from "../markdown";
 import { isBlockExpanded, toggleBlockExpanded } from "./expansion-state";
 import type { ToolResultEvent, AssistantMessageEvent } from "../models/Response";
 import {
-  renderAssistantMessage,
   renderAssistantMessageChildren,
+  renderUngroupedRun,
   renderPermissionItem,
   renderUserMessage,
 } from "./message-renderers";
+import { GROUPED_WORK_CLASS, groupedWorkEventIds } from "./work-grouping";
 import type { StepNode, StepStatus, TimelineItem } from "./turn-grouping";
 import { statusDoneIcon, statusPendingIcon, statusRingIcon } from "@imbue/workspace-ui/src/components/icons";
 
@@ -104,8 +105,18 @@ function renderStepCaption(step: StepNode, isExpanded: boolean): m.Vnode | null 
 
 function renderExpandedStepBody(step: StepNode, toolResults: Map<string, ToolResultEvent>, agentId: string): m.Vnode {
   const children: m.Children[] = [];
+  // Work introduced by a sentence is indented under it, so the reason for a batch
+  // of calls sits directly above the batch (see work-grouping).
+  const grouped = groupedWorkEventIds(step.events);
   for (const e of step.events) {
-    children.push(...renderAssistantMessageChildren(e, toolResults, agentId));
+    const rendered = renderAssistantMessageChildren(e, toolResults, agentId);
+    // These children are an unkeyed fragment, so the wrapper must stay unkeyed too:
+    // mithril requires all-or-none keys among siblings.
+    if (grouped.has(e.event_id)) {
+      children.push(m("div", { class: GROUPED_WORK_CLASS }, rendered));
+    } else {
+      children.push(...rendered);
+    }
   }
   // The subtle indent + left rule containing the revealed work; its p and
   // tool-block child rules stay in style.css.
@@ -210,7 +221,7 @@ export function ProgressBlock(): m.Component<ProgressBlockAttrs> {
           return m(
             "div",
             { class: "pv-ungrouped relative z-[2] mb-3.5 bg-chat pt-1.5", key: item.key },
-            item.events.map((e) => renderAssistantMessage(e, toolResults, agentId)),
+            renderUngroupedRun(item.events, toolResults, agentId),
           );
         }
         if (item.kind === "permission") {

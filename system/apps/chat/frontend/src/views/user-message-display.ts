@@ -38,7 +38,8 @@ export const USER_BUBBLE_CLASS =
  *  of source; only the label and body differ. Width-capped like the user
  *  bubbles on its rail (the assistant flow's blocks run full-width instead). */
 function renderSystemChip(label: string, body: string, expansionKey: string): m.Vnode {
-  return renderToolBlock({ headerText: label, inputText: body, extra: "max-w-[80%]", expansionKey });
+  // A system/hook chip has no verb/target split -- its label is already one phrase.
+  return renderToolBlock({ headerVerb: label, inputText: body, extra: "max-w-[80%]", expansionKey });
 }
 
 export function StableUserMessage(): m.Component<{ event: UserMessageEvent }> {

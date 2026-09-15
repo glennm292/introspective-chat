@@ -359,8 +359,10 @@ _TOOL_CALL_SESSION_EVENTS: list[dict[str, Any]] = [
 
 
 @pytest.mark.timeout(60, func_only=False)
-def test_tool_calls_render_as_collapsible(tmp_path: Path, page: Page) -> None:
-    """Tool calls render as collapsible blocks that expand to show input/output."""
+def test_a_tool_call_shows_what_ran_and_what_came_back(tmp_path: Path, page: Page) -> None:
+    """The two-level block: the header says what the call DID, and its result is
+    already visible under it -- no click, and no fetch, because the opening lines
+    ride the event. Clicking then expands to the whole output."""
     with _running_e2e_server(tmp_path, session_events=_TOOL_CALL_SESSION_EVENTS) as server:
         page.goto(server.shell_url)
         _open_fixture_chat(page)
@@ -368,13 +370,23 @@ def test_tool_calls_render_as_collapsible(tmp_path: Path, page: Page) -> None:
         expect(_chat(page).locator(".message-assistant").first).to_be_visible(timeout=15000)
         tool_block = _chat(page).locator(".tool-call-block").first
         expect(tool_block).to_be_visible(timeout=10000)
-        expect(tool_block).to_contain_text("Read")
 
+        # Level one: the work, not the tool. The old header read "Tool: Read".
+        header = _chat(page).locator(".tool-call-header").first
+        expect(header).to_contain_text("read")
+        expect(header).not_to_contain_text("Tool:")
+
+        # Level two: the result, visible while the block is still collapsed.
+        preview = _chat(page).locator(".tool-call-preview").first
+        expect(preview).to_be_visible()
+        expect(preview).to_contain_text("file contents here")
+
+        # Expanding reveals the full panes; the preview steps aside for them.
         tool_details = _chat(page).locator(".tool-call-details").first
         expect(tool_details).to_be_hidden()
-        _chat(page).locator(".tool-call-header").first.click()
+        header.click()
         expect(tool_details).to_be_visible()
-        expect(tool_details).to_contain_text("file contents here")
+        expect(preview).to_be_hidden()
 
 
 @pytest.mark.timeout(60, func_only=False)

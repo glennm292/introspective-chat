@@ -95,6 +95,8 @@ from imbue.chat.models import SetModelChoiceRequest
 from imbue.chat.models import ShoulderTapAtomicResponse
 from imbue.chat.models import StartAgentResponse
 from imbue.chat.models import StopAgentResponse
+from imbue.chat.outline import build_outline
+from imbue.chat.overview import build_overview
 from imbue.chat.presence import PresenceReport
 from imbue.chat.request_helpers import handle_unhandled_exception
 from imbue.chat.request_helpers import json_response
@@ -212,6 +214,40 @@ def _get_events(agent_id: str) -> Response:
     total = watcher.get_total_event_count()
     offset = watcher.get_event_offset(events[0]["event_id"]) if events else total
     return json_response({"events": events, "offset": offset, "total": total})
+
+
+def _get_outline(agent_id: str) -> Response:
+    """One short entry per message for the navigation rail, over the WHOLE conversation.
+
+    Deliberately not derived from the loaded window: the transcript only holds a
+    slice of a long conversation, so a rail built from it would gain and lose
+    entries as the user scrolls. Reading every event here is affordable precisely
+    because they are payload-free, and the response carries only openings (see
+    :mod:`imbue.chat.outline`).
+    """
+    agent_info = _find_agent(agent_id)
+    if agent_info is None:
+        return _agent_not_found_response(agent_id)
+    watcher = get_state().get_or_create_watcher(agent_info)
+    total = watcher.get_total_event_count()
+    events = watcher.get_events_at_offset(0, total) if total > 0 else []
+    entries = build_outline(events)
+    return json_response({"entries": [entry.model_dump() for entry in entries], "total": total})
+
+
+def _get_overview(agent_id: str) -> Response:
+    """Counts and durations for this conversation's model and tool activity.
+
+    Over every event, for the same reason the outline is: the figures describe the
+    whole conversation, not whichever slice the transcript happens to hold.
+    """
+    agent_info = _find_agent(agent_id)
+    if agent_info is None:
+        return _agent_not_found_response(agent_id)
+    watcher = get_state().get_or_create_watcher(agent_info)
+    total = watcher.get_total_event_count()
+    events = watcher.get_events_at_offset(0, total) if total > 0 else []
+    return json_response(build_overview(events).model_dump())
 
 
 def _stream_filtered_events(
@@ -1274,6 +1310,8 @@ def create_application(state: ChatState) -> Flask:
     application.add_url_rule("/api/agents/<agent_id>/start", view_func=_start_agent, methods=["POST"])
     application.add_url_rule("/api/agents/<agent_id>/stop", view_func=_stop_agent, methods=["POST"])
     application.add_url_rule("/api/agents/<agent_id>/events", view_func=_get_events, methods=["GET"])
+    application.add_url_rule("/api/agents/<agent_id>/outline", view_func=_get_outline, methods=["GET"])
+    application.add_url_rule("/api/agents/<agent_id>/overview", view_func=_get_overview, methods=["GET"])
     application.add_url_rule(
         "/api/agents/<agent_id>/events/<event_id>/detail", view_func=_get_event_detail, methods=["GET"]
     )

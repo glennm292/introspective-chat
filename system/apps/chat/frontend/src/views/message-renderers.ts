@@ -17,6 +17,7 @@ import type { PermissionResolution } from "./message-classification";
 import { isSkillExpansionUserMessage } from "./message-classification";
 import { PermissionCard, isFiledPermissionRequest, parsePermissionRequest } from "./permission-card";
 import { renderToolBlock, type PayloadState } from "./ToolCallBlock";
+import { GROUPED_WORK_CLASS, groupedWorkEventIds } from "./work-grouping";
 import { badgeClass } from "@imbue/workspace-ui/src/components/Badge";
 
 /** A permission-request tool call's own verdict: its own request id's entry in
@@ -230,15 +231,39 @@ export function renderAssistantMessage(
   event: AssistantMessageEvent,
   toolResults: Map<string, ToolResultEvent>,
   agentId: string,
+  // Appended to the row's own class. Used for the indent that ties a batch of work
+  // to the sentence above it -- added HERE rather than by wrapping the row, because
+  // a wrapper would take over the root and the row's id/key (which measureRows and
+  // mithril's keyed-fragment rule both depend on) would no longer be on it.
+  extraClass = "",
 ): m.Vnode {
   return m(
     "div",
     {
       id: event.event_id,
-      class: "message message-assistant mb-5",
+      class: `message message-assistant mb-5 ${extraClass}`.trim(),
       key: event.event_id,
     },
     m(StableAssistantMessage, { event, toolResults, agentId }),
+  );
+}
+
+/**
+ * Render a run of assistant messages with each batch of work indented under the
+ * sentence that introduced it.
+ *
+ * The rows stay one-per-message (the virtualized list measures them individually);
+ * only the indent is added, so the sentence keeps its place in the flow and is
+ * never duplicated into the group as a caption.
+ */
+export function renderUngroupedRun(
+  events: readonly AssistantMessageEvent[],
+  toolResults: Map<string, ToolResultEvent>,
+  agentId: string,
+): m.Children[] {
+  const grouped = groupedWorkEventIds(events);
+  return events.map((event) =>
+    renderAssistantMessage(event, toolResults, agentId, grouped.has(event.event_id) ? GROUPED_WORK_CLASS : ""),
   );
 }
 
@@ -392,13 +417,22 @@ export function renderToolCallBlock(
   }
 
   return renderToolBlock({
-    headerText: toolCall.header_label || `Tool: ${toolCall.tool_name}`,
+    // The two halves are stamped separately now. An event parsed before the split
+    // still carries only the joined label, so it becomes the verb whole and simply
+    // renders in one face -- correct, just not two-tone.
+    headerVerb: toolCall.header_verb || toolCall.header_label || toolCall.tool_name || "ran a tool",
+    headerTarget: toolCall.header_verb ? toolCall.header_target : undefined,
     inputText,
     outputText,
     inputState,
     outputState,
     isError,
     errorSnippet: toolResult?.error_snippet ?? undefined,
+    // The resident opening lines of the result, so the collapsed block shows what
+    // came back. A frontend-synthesized skill expansion has no preview stamped, so
+    // it falls back to its own inline body.
+    previewText: toolResult?.output_preview || (toolResult?.output ?? "").split("\n").slice(0, 4).join("\n"),
+    reasonText: toolCall.reason_label ?? undefined,
     // The markdown rhythm: the same vertical slot a paragraph-adjacent block
     // gets in the assistant flow.
     extra: "my-[0.25em]",

@@ -1,0 +1,76 @@
+# Machine-readable manifest for this template. The sibling
+# template.md holds the prose, the Requirements list, and the two
+# append-only history logs; this file is authoritative for everything
+# below. Both are generated together -- validate_template.py fails if
+# they disagree.
+format = "v2"
+
+[template]
+slug = "introspective-chat"
+title = "Introspective Chat"
+description = "A chat that shows its own work: every action says what it ran and what came back, an index tracks the conversation, and an overview counts calls, time and tokens."
+thumbnail = "template.svg"
+version = "v2"
+
+# How this template is DERIVED from the workspace it came from. An
+# update re-runs this recipe rather than diffing two repos, which is what
+# keeps an exclusion excluded even though the thing still exists upstream.
+[recipe]
+include = ["system/apps/chat", "system/libs/workspace_ui"]
+data_include = []
+exclude = [
+  "system/scripts/check_dactal_engine.py -- the publisher's DACTAL engine-checker work, unrelated to this feature",
+  ".agents/skills/dactal-based/ -- the publisher's DACTAL skill, unrelated to this feature",
+  "system/test_meta_ratchets.py -- the publisher's repo-wide meta-ratchet change, not part of this feature",
+  "data/ -- all workspace data (chat transcripts, memories, tickets, app state); none of it is shareable or needed",
+  "the publisher's other apps under system/apps/ -- unrelated to the chat",
+]
+modification_rules = [
+    "In the claude harness queue-session test fixtures, replace the captured third-party contributor email address with a neutral example.com placeholder. The fixtures are stock upstream data and no test asserts on the address; it is removed because a published public repo should not carry a real person's work email.",
+]
+
+# Everything an adopter must deal with before this is really theirs.
+# One list -- but each entry's KIND says how it is handled, because the
+# two are handled at different times by different mechanisms:
+#
+#   permission / secret / llm = ACTIVATION. The adopting agent acts on
+#   these FIRST and BY ITSELF, initiating each latchkey permission
+#   request before asking the user anything. Every one of them must have
+#   a matching requires_ line in template.md and vice versa -- the
+#   validator checks that, because an adopter once never got prompted
+#   for a permission the app needed.
+#
+#   adaptation = worked through INTERACTIVELY with the user afterwards.
+#   Prose on both sides, so it is not cross-checked.
+#
+# This template has NO activation requirements: no permission, no secret, no
+# LLM. The included code calls no external service and no model -- it reads the
+# transcript the chat app already reads and renders it. template.md carries no
+# requires_ lines to match, which is what the validator cross-checks.
+[requirements]
+
+[[requirements.adaptation]]
+summary = "this template modifies a BUILT-IN app (system/apps/chat) and the shared frontend library (system/libs/workspace_ui) rather than adding a new app, so an adopting workspace merges these files against its own copies"
+resolution = "a mind created fresh from this template needs nothing; an adopter on a different Minds version should expect merge conflicts in those two paths and resolve them by reading each conflict rather than taking 'ours' (which drops the feature) or 'theirs' (which reverts the adopting workspace's own chat) wholesale. The published base is the upstream template at minds-v0.5.2."
+
+[[requirements.adaptation]]
+summary = "the transcript scroll engine's jumpToEventIndex method is new and lightly exercised outside this feature, and an index entry whose message renders inside a collapsed step block cannot be scrolled to"
+resolution = "know the method exists and is depended on before touching frontend/src/views/transcript-scroll-engine.ts; to fix the collapsed-step gap, have the rail target and expand the containing step rather than the message itself"
+
+[[requirements.adaptation]]
+summary = "the test_a_new_chat_* end-to-end tests in system/apps/chat are flaky at roughly one run in three on the UNMODIFIED upstream app"
+resolution = "re-run before investigating; the flakiness predates this template and is not caused by it"
+
+# What the included code needs INSTALLED. apt takes bare names: versions
+# are a function of the apt snapshot timestamp, so replaying names at the
+# adopter's timestamp yields versions consistent with the rest of their
+# environment. The other sources are not snapshot-pinned, so for them the
+# recorded version IS the pin (name = version).
+#
+# This template needs NOTHING beyond the stock workspace environment: no apt
+# packages, no global npm/uv/cargo tools, no env.d units. The backend imports
+# only what the chat app already depended on, and the frontend builds with the
+# npm workspace the template already ships.
+[environment]
+apt = []
+env_d_units = []

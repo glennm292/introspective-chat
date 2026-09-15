@@ -22,7 +22,9 @@ from typing import Final
 
 from imbue.chat.harnesses.antigravity.agy_transcript import DecodedStep
 from imbue.chat.harnesses.antigravity.tool_labels import shell_command
+from imbue.chat.harnesses.antigravity.tool_labels import header_parts
 from imbue.chat.harnesses.antigravity.tool_labels import tool_labels
+from imbue.chat.harnesses.antigravity.tool_labels import tool_reason
 from imbue.chat.harnesses.auth_errors import is_auth_error_text
 from imbue.chat.harnesses.message_display import stamp_user_message_display
 from imbue.chat.harnesses.tool_output import classify_tool_call_display
@@ -30,6 +32,7 @@ from imbue.chat.harnesses.tool_output import error_snippet
 from imbue.chat.harnesses.tool_output import find_permission_request
 from imbue.chat.harnesses.tool_output import is_pure_tk_lifecycle_command
 from imbue.chat.harnesses.tool_output import is_tk_lifecycle_anywhere
+from imbue.chat.harnesses.tool_output import output_preview
 from imbue.chat.harnesses.tool_output import tk_stamp
 
 # "common" here means the normalized/common event *form*, matching the
@@ -123,6 +126,18 @@ def _tool_events(step: DecodedStep) -> list[dict[str, Any]]:
         "header_label": header_label,
         "caption_label": caption_label,
     }
+    # The agent's own stated reason, when the tool records one at all. Absent for
+    # every tool that takes no description -- never inferred (see tool_labels).
+    # The header's two halves ride separately: the view sets the prose verb and the
+    # literal target in different type, and a joined label could not be split back
+    # apart without guessing where a multi-word verb ends.
+    header_verb, header_target = header_parts(call.name, call.args)
+    tool_call["header_verb"] = header_verb
+    if header_target:
+        tool_call["header_target"] = header_target
+    reason_label = tool_reason(call.name, call.args)
+    if reason_label:
+        tool_call["reason_label"] = reason_label
     # The render decision ships with the call, exactly as it does for claude/codex/pi: a PURE
     # tk lifecycle call is a hidden structural marker rather than work, and a latchkey POST
     # renders as the permission card (recognised from the INPUT, so the card appears while the
@@ -161,6 +176,9 @@ def _tool_events(step: DecodedStep) -> list[dict[str, Any]]:
         snippet = error_snippet(raw_output) if step.is_error_result else ""
         if snippet:
             result_event["error_snippet"] = snippet
+        preview = output_preview(raw_output)
+        if preview:
+            result_event["output_preview"] = preview
         stamped_tk = tk_stamp(raw_output)
         if stamped_tk:
             result_event["tk_stamp"] = stamped_tk

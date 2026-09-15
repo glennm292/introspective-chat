@@ -34,12 +34,15 @@ from imbue.chat.harnesses.error_patterns import classify_api_error
 from imbue.chat.harnesses.error_patterns import is_provider_fault
 from imbue.chat.harnesses.message_display import stamp_user_message_display
 from imbue.chat.harnesses.pi_coding.tool_labels import shell_command
+from imbue.chat.harnesses.pi_coding.tool_labels import header_parts
 from imbue.chat.harnesses.pi_coding.tool_labels import tool_labels
+from imbue.chat.harnesses.pi_coding.tool_labels import tool_reason
 from imbue.chat.harnesses.tool_output import classify_tool_call_display
 from imbue.chat.harnesses.tool_output import error_snippet
 from imbue.chat.harnesses.tool_output import find_permission_request
 from imbue.chat.harnesses.tool_output import is_pure_tk_lifecycle_command
 from imbue.chat.harnesses.tool_output import is_tk_lifecycle_anywhere
+from imbue.chat.harnesses.tool_output import output_preview
 from imbue.chat.harnesses.tool_output import tk_stamp
 
 # "common" here means the normalized/common event *form*, not the on-disk common-transcript
@@ -84,6 +87,18 @@ def _labelled_tool_call(block: dict[str, Any]) -> dict[str, Any]:
         "header_label": header_label,
         "caption_label": caption_label,
     }
+    # The agent's own stated reason, when the tool records one at all. Absent for
+    # every tool that takes no description -- never inferred (see tool_labels).
+    # The header's two halves ride separately: the view sets the prose verb and the
+    # literal target in different type, and a joined label could not be split back
+    # apart without guessing where a multi-word verb ends.
+    header_verb, header_target = header_parts(tool_name, raw_input)
+    tool_call["header_verb"] = header_verb
+    if header_target:
+        tool_call["header_target"] = header_target
+    reason_label = tool_reason(tool_name, raw_input)
+    if reason_label:
+        tool_call["reason_label"] = reason_label
     # The render decision ships with the call: a PURE tk lifecycle call is a hidden
     # structural marker (the hide rule is stricter than the truncation exemption -- see
     # tool_output.is_pure_tk_lifecycle_command); a latchkey POST renders as the card.
@@ -217,6 +232,9 @@ def _tool_result_event(event_id: str, timestamp: str, message: dict[str, Any]) -
     snippet = error_snippet(raw_output) if is_error else ""
     if snippet:
         event["error_snippet"] = snippet
+    preview = output_preview(raw_output)
+    if preview:
+        event["output_preview"] = preview
     stamped_tk = tk_stamp(raw_output)
     if stamped_tk:
         event["tk_stamp"] = stamped_tk

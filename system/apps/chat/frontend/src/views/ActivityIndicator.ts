@@ -106,7 +106,7 @@ function renderStrip(label: string, state: string | null | undefined): m.Vnode {
     "div",
     {
       class:
-        "agent-activity-indicator mx-auto mb-2 flex w-full max-w-(--width-message-column) items-center gap-2 px-1 " +
+        "agent-activity-indicator mr-auto mb-2 flex w-full max-w-(--width-message-column) items-center gap-2 px-1 " +
         "text-(length:--font-size-helper) text-secondary",
       "data-state": state,
       role: "status",

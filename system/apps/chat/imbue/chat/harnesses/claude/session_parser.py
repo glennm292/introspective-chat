@@ -17,7 +17,9 @@ from pydantic import Field
 
 from imbue.chat.harnesses.auth_errors import is_auth_error_text
 from imbue.chat.harnesses.claude.tool_labels import shell_command
+from imbue.chat.harnesses.claude.tool_labels import header_parts
 from imbue.chat.harnesses.claude.tool_labels import tool_labels
+from imbue.chat.harnesses.claude.tool_labels import tool_reason
 from imbue.chat.harnesses.error_patterns import classify_api_error
 from imbue.chat.harnesses.error_patterns import is_provider_fault
 from imbue.chat.harnesses.message_display import stamp_user_message_display
@@ -26,6 +28,7 @@ from imbue.chat.harnesses.tool_output import error_snippet
 from imbue.chat.harnesses.tool_output import find_permission_request
 from imbue.chat.harnesses.tool_output import is_pure_tk_lifecycle_command
 from imbue.chat.harnesses.tool_output import is_tk_lifecycle_anywhere
+from imbue.chat.harnesses.tool_output import output_preview
 from imbue.chat.harnesses.tool_output import tk_stamp
 from imbue.imbue_common.enums import UpperCaseStrEnum
 from imbue.imbue_common.frozen_model import FrozenModel
@@ -326,6 +329,18 @@ def _parse_assistant_message(
                 "header_label": header_label,
                 "caption_label": caption_label,
             }
+            # The agent's own stated reason, when the tool records one at all. Absent for
+            # every tool that takes no description -- never inferred (see tool_labels).
+            # The header's two halves ride separately: the view sets the prose verb and the
+            # literal target in different type, and a joined label could not be split back
+            # apart without guessing where a multi-word verb ends.
+            header_verb, header_target = header_parts(tool_name, raw_input)
+            tool_call["header_verb"] = header_verb
+            if header_target:
+                tool_call["header_target"] = header_target
+            reason_label = tool_reason(tool_name, raw_input)
+            if reason_label:
+                tool_call["reason_label"] = reason_label
             # The render decision ships with the call (a hidden tk marker, or the
             # permission card), recognised from the full input backend-side; the
             # frontend never re-derives it from the command text.
@@ -506,6 +521,9 @@ def _parse_user_message(
             snippet = error_snippet(result_content) if is_error else ""
             if snippet:
                 event["error_snippet"] = snippet
+            preview = output_preview(result_content)
+            if preview:
+                event["output_preview"] = preview
             stamped_tk = tk_stamp(result_content)
             if stamped_tk:
                 event["tk_stamp"] = stamped_tk

@@ -59,7 +59,9 @@ from loguru import logger as _loguru_logger
 from imbue.chat.harnesses.auth_errors import is_auth_error_text
 from imbue.chat.harnesses.codex.tool_labels import is_single_delegated_call
 from imbue.chat.harnesses.codex.tool_labels import shell_command
+from imbue.chat.harnesses.codex.tool_labels import header_parts
 from imbue.chat.harnesses.codex.tool_labels import tool_labels
+from imbue.chat.harnesses.codex.tool_labels import tool_reason
 from imbue.chat.harnesses.error_patterns import classify_api_error
 from imbue.chat.harnesses.error_patterns import is_provider_fault
 from imbue.chat.harnesses.events import SPECIAL_EVENT_TYPE
@@ -70,6 +72,7 @@ from imbue.chat.harnesses.tool_output import error_snippet
 from imbue.chat.harnesses.tool_output import find_permission_request
 from imbue.chat.harnesses.tool_output import is_pure_tk_lifecycle_command
 from imbue.chat.harnesses.tool_output import is_tk_lifecycle_anywhere
+from imbue.chat.harnesses.tool_output import output_preview
 from imbue.chat.harnesses.tool_output import tk_stamp
 
 logger = _loguru_logger
@@ -157,6 +160,18 @@ def _labelled_tool_call(call_id: str, tool_name: str, raw_input: str) -> dict[st
         "header_label": header_label,
         "caption_label": caption_label,
     }
+    # The agent's own stated reason, when the tool records one at all. Absent for
+    # every tool that takes no description -- never inferred (see tool_labels).
+    # The header's two halves ride separately: the view sets the prose verb and the
+    # literal target in different type, and a joined label could not be split back
+    # apart without guessing where a multi-word verb ends.
+    header_verb, header_target = header_parts(tool_name, raw_input)
+    tool_call["header_verb"] = header_verb
+    if header_target:
+        tool_call["header_target"] = header_target
+    reason_label = tool_reason(tool_name, raw_input)
+    if reason_label:
+        tool_call["reason_label"] = reason_label
     # The render decision ships with the call (a hidden tk marker, or the permission
     # card), recognised from the UNTRUNCATED input backend-side.
     #
@@ -577,6 +592,9 @@ def parse_lines(
         snippet = error_snippet(raw_output) if is_error else ""
         if snippet:
             event["error_snippet"] = snippet
+        preview = output_preview(raw_output)
+        if preview:
+            event["output_preview"] = preview
         stamped_tk = tk_stamp(raw_output)
         if stamped_tk:
             event["tk_stamp"] = stamped_tk

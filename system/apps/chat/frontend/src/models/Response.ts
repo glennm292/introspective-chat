@@ -33,6 +33,17 @@ export interface ToolCall {
   // only for events parsed before the labels existed.
   header_label?: string;
   caption_label?: string;
+  // The header's two halves, kept apart so the view can set them in different type:
+  // `header_verb` is prose ("ran", "read"), `header_target` is the literal thing the
+  // call acted on (a command, a path) and is the only machine text of the two. The
+  // joined `header_label` remains for events parsed before the split.
+  header_verb?: string;
+  header_target?: string;
+  // The agent's OWN stated reason for making this call, when the tool records one
+  // (a shell command's description, a delegation's). Absent for every tool that
+  // takes no description -- most calls -- and deliberately never inferred, so an
+  // absent reason renders as nothing rather than as a guess.
+  reason_label?: string;
   // For Agent tool calls: the description and subagent_type from the tool input, present
   // as soon as the call appears so the rich card can render before the subagent session is
   // linked. subagent_metadata (with the session_id for the click-through) is filled in once
@@ -147,6 +158,10 @@ export interface ToolResultEvent extends BaseTranscriptEvent {
   // A failed call's first output line, stamped resident so failures stay glanceable
   // without a fetch. Present only when is_error and the output had a line.
   error_snippet?: string;
+  // The opening lines of the output (a few lines, capped), stamped resident so a
+  // collapsed block can show what came back rather than only what ran. A bounded
+  // exception to the payload-free rule above: expanding still fetches the output whole.
+  output_preview?: string;
   // The tk decoration lines the step progress view reads (Created/Updated/tk-step, plus
   // step-id echoes), stamped resident so the view never needs the raw output.
   tk_stamp?: string;

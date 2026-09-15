@@ -91,7 +91,7 @@ def test_terminal_tool_step_emits_matched_call_and_result() -> None:
     assert [e["type"] for e in events] == ["assistant_message", "tool_result"]
     call = events[0]["tool_calls"][0]
     assert call["tool_name"] == "run_command"
-    assert call["header_label"] == "Tool: Bash"
+    assert call["header_label"] == "ran python3 showcase.py"
     assert call["caption_label"] == "Running python3 showcase.py"
     # call and result share the tool_call_id so the frontend pairs them
     assert events[1]["tool_call_id"] == call["tool_call_id"] == "c1:16:toolcall"

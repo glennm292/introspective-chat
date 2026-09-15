@@ -1,52 +1,98 @@
-# Your workspace
+<p align="center">
+  <img alt="Introspective Chat" src="template.svg" width="480">
+</p>
 
-This folder is your mind's home: everything it knows, everything it builds,
-and the machinery that keeps it running.
+# Introspective Chat
 
-## Creations
+<p align="center">
+  <a href="https://boweiliu.github.io/open-in-minds/?git_url=https://github.com/glennm292/introspective-chat"><img alt="Open in Minds" height="64" src="https://img.shields.io/badge/Open%20in%20Minds-D8D1C0?style=for-the-badge"></a>
+</p>
 
-Broadly, in Minds you make "creations". These can be "code" (apps, skills, and
-the services behind them) or "data" (documents, images, notes).
+Didn't work? Create a Minds workspace and paste this to your agent:
+` /use-template https://github.com/glennm292/introspective-chat`
 
-Minds makes this easier by defining some conventions for the common things
-you'll want to make:
+## Why you care
 
-1. an "app" - something you can open as a tab and interact with
-2. a "skill" - teaches your mind how to do work you care about. A skill that
-   is automatically run on a schedule is called an "automation" (the
-   machinery that runs them lives in `system/libs/automations/`; the weekly
-   Caretaker is the built-in example)
-3. some "data" - documents, images, notes, or data created by your apps and
-   skills
-4. some "customizations" - changes to any of the above. Everything in Minds
-   can be modified by you!
+A chat that shows its own work: every action says what it ran and what came back, an index tracks the conversation, and an overview counts calls, time and tokens.
 
-## What's here
+When an agent works for you, most of what it did is hidden behind rows of
+identical `Tool: Bash` labels you have to click open one at a time, and the only
+account of what happened is the agent's own summary of itself. This chat shows
+the work instead: you can read what it ran and what came back without clicking
+anything, find any point in a long conversation from an index down the side, and
+see at a glance where the time actually went.
 
-- `apps/` - Everything you can open as a tab: the built-in apps (chat, the
-  terminal, the file viewer, the browser) and the apps your mind builds for you. (A shortcut
-  to `system/apps/`.)
-- `skills/` - Everything your mind knows how to do: the built-in skills and
-  the ones it has learned for you. (A shortcut to `.agents/skills/`.)
-- `data/` - Your workspace's data: documents and project folders, files
-  you've uploaded, your mind's memories, and each app's stored data.
-- `docs/` - Guides to this workspace: what it is, how it works, and a history
-  of where it came from.
-- `system/` - The machinery that runs the workspace: the apps themselves,
-  background services, scripts, and configuration. You can look around (every
-  folder has a README), and your mind maintains it for you.
+## How to use it
 
-A few housekeeping files live alongside them:
+There is nothing to launch and nothing to configure. This *is* the chat -- open
+a chat tab and talk to your agent exactly as before. What changes is what the
+conversation shows you.
 
-- `README.md` - This file.
-- `CLAUDE.md` - The standing instructions your mind follows.
-- `pyproject.toml` and `uv.lock` - The Python project definition; the tooling
-  requires them at the top level.
+**Read a tool call without opening it.** The header is the work, not the tool:
 
-## Where things are kept safe
+```
+ran  uv run pytest -q
+     ........................................
+     40 passed in 3.21s
+```
 
-The workspace is a git repository: code and configuration changes are
-committed as your mind works. Everything under `data/` is deliberately kept
-out of git (it can be large, personal, or both) and is protected by the
-workspace's continuous encrypted backup instead, along with the rest of the
-workspace. See `docs/` for details.
+The verb is plain text, the command or path is monospace, and the first few
+lines of output are already there in the collapsed block. Click to expand and
+you get the whole output in a scrollable pane.
+
+**See why, when the agent actually said why.** If a tool recorded the agent's
+own stated reason for the call -- a shell command's or a delegation's
+description -- it appears above the block. Nothing is ever inferred: a call with
+no recorded reason gets no reason line. Instead, a batch of calls is indented
+under the sentence of prose that introduced it, so the agent's own explanation
+sits above the work it explains.
+
+**Jump around a long conversation.** A rail down the left lists every message in
+the conversation -- yours and the agent's, first two lines each, nothing
+summarised or generated. Yours are inset and tinted, the agent's flush left.
+Click one to scroll to it; the highlight follows as you scroll. The rail covers
+the *whole* conversation, not just the part currently loaded, so it does not
+gain and lose entries as you move.
+
+**See where the time went.** An **Agent Overview** link sits in the footer next
+to the model name. It opens a table: model calls and each kind of tool call,
+with how many there were, how long they took in total and on average, biggest
+consumer of time first -- plus a row of token figures. Times are gaps between
+the conversation's own timestamps, so they are wall-clock rather than metered;
+the panel says so, a call still awaiting its result is counted but marked
+untimed rather than scored as zero, and a gap long enough to be you leaving the
+room is dropped rather than charged to the model.
+
+Both the index and the overview are ordinary read-only endpoints on the chat
+server -- `/api/agents/<id>/outline` and `/api/agents/<id>/overview` -- if you
+want the numbers somewhere else.
+
+## Ideas for making it yours
+
+- **Show more (or less) of each result.** The inline preview is capped at 4
+  lines and 400 characters in `imbue/chat/harnesses/events.py`. Raise it if you
+  read a lot of test output; drop it to one line if you want a denser
+  transcript.
+- **Write your own verbs.** Each harness has its own `tool_labels.py` deciding
+  what a call's header says. Teach it your tools -- a deploy script could read
+  `deployed staging` instead of `ran ./deploy.sh staging`.
+- **Put the overview somewhere permanent.** `/api/agents/<id>/overview` returns
+  the whole table as data. Poll it into a dashboard, or have a scheduled job
+  write a weekly "where the time went" summary across all your conversations.
+- **Make the index searchable.** The rail already has the opening of every
+  message in the conversation. A filter box over it turns it into a find-in-
+  conversation, which the windowed transcript cannot do on its own.
+- **Group work differently.** `frontend/src/views/work-grouping.ts` decides
+  which tool calls belong under which sentence. Collapse long runs by default,
+  or fold consecutive calls to the same tool into one block.
+
+## What this is
+
+This repository is a published **minds template**: a clean, bootable
+snapshot of what a mind built, ready to adapt into your own. It is NOT the
+generic workspace template -- it is this specific project.
+
+[`template.md`](template.md) is the full manifest -- what it is, how it
+works, what it needs to run, and what to adapt -- with the
+machine-readable half (recipe, requirements, and the environment it needs
+installed) in [`template.toml`](template.toml).

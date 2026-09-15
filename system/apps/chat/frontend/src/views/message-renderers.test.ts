@@ -351,36 +351,121 @@ describe("renderToolCallBlock", () => {
     tool_call_id: "c1",
     tool_name: "exec",
     input_chars: 72,
-    header_label: "Tool: Bash",
+    header_verb: "ran",
+    header_target: "uv run pytest -q",
   };
 
-  it("renders the parser's header label", () => {
+  function resultFor(callId: string, fields: Partial<ToolResultEvent> = {}): ToolResultEvent {
+    return {
+      timestamp: "t",
+      type: "tool_result",
+      event_id: `r-${callId}`,
+      source: "test",
+      tool_call_id: callId,
+      tool_name: "Bash",
+      output_chars: 5000,
+      is_error: false,
+      ...fields,
+    };
+  }
+
+  it("heads the block with what ran, never with the tool's name", () => {
     const text = allText(renderToolCallBlock(execCall, null, "agent-x", "a-1"));
-    // A codex exec is headed by what it actually did, never the bare "Tool: exec".
-    expect(text).toContain("Tool: Bash");
-    expect(text).not.toContain("Tool: exec");
+    expect(text).toContain("ran");
+    expect(text).toContain("uv run pytest -q");
+    // The old form named the tool and told the reader nothing about the work.
+    expect(text).not.toContain("Tool:");
+    expect(text).not.toContain("exec");
   });
 
-  it("falls back to 'Tool: <name>' for a call parsed before labels existed", () => {
+  it("sets the verb in prose type and only the command in monospace", () => {
+    // The verb is what a person scans; the command is quoted machine text. Marking
+    // them with different classes is what lets the stylesheet treat them differently.
+    const classes = collectClasses(renderToolCallBlock(execCall, null, "agent-x", "a-1"));
+    expect(classes).toContain("tool-call-verb");
+    expect(classes).toContain("tool-call-target");
+    expect(classes).toContain("font-mono");
+    // The header strip itself no longer forces monospace on everything inside it.
+    const header = classes.join(" ");
+    expect(header).toContain("tool-call-header");
+  });
+
+  it("renders a pre-split event's joined label as the verb, in one face", () => {
+    const old: ToolCall = { tool_call_id: "c9", tool_name: "Bash", input_chars: 6, header_label: "ran ls -la" };
+    const text = allText(renderToolCallBlock(old, null, "agent-x", "a-1"));
+    expect(text).toContain("ran ls -la");
+    const classes = collectClasses(renderToolCallBlock(old, null, "agent-x", "a-1"));
+    expect(classes).not.toContain("tool-call-target");
+  });
+
+  it("falls back to the tool name for a call parsed before labels existed", () => {
     const bash: ToolCall = { tool_call_id: "c2", tool_name: "Bash", input_chars: 6 };
-    expect(allText(renderToolCallBlock(bash, null, "agent-x", "a-1"))).toContain("Tool: Bash");
+    const text = allText(renderToolCallBlock(bash, null, "agent-x", "a-1"));
+    expect(text).toContain("Bash");
+    expect(text).not.toContain("Tool:");
+  });
+
+  it("shows the result's opening lines under the collapsed header", () => {
+    const call: ToolCall = { tool_call_id: "c4", tool_name: "Bash", input_chars: 6 };
+    const result = resultFor("c4", { output_preview: "14 passed in 0.08s" });
+    const text = allText(renderToolCallBlock(call, result, "agent-x", "a-1"));
+    expect(text).toContain("14 passed in 0.08s");
+  });
+
+  it("renders the preview without fetching the full output", () => {
+    // The whole point of the resident preview: a collapsed transcript shows its
+    // results with no requests at all.
+    const call: ToolCall = { tool_call_id: "c5", tool_name: "Bash", input_chars: 6 };
+    const result = resultFor("c5", { output_preview: "ok" });
+    const classes = collectClasses(renderToolCallBlock(call, result, "agent-x", "a-1"));
+    expect(classes).toContain("tool-call-preview");
+    // The expanded pane is still deferred, so it reports itself as loading.
+    expect(allText(renderToolCallBlock(call, result, "agent-x", "a-1"))).toContain("ok");
+  });
+
+  it("shows the agent's stated reason above the block when there is one", () => {
+    const call: ToolCall = {
+      tool_call_id: "c6",
+      tool_name: "Bash",
+      input_chars: 6,
+      header_verb: "ran",
+      header_target: "pytest -q",
+      reason_label: "Check the gate still refuses a bad engine",
+    };
+    const text = allText(renderToolCallBlock(call, null, "agent-x", "a-1"));
+    expect(text).toContain("Check the gate still refuses a bad engine");
+  });
+
+  it("shows no reason line for a call that states none", () => {
+    // Most calls -- every read, edit and write -- record no reason at all, and a
+    // guessed one would read exactly like a stated one.
+    const call: ToolCall = {
+      tool_call_id: "c7",
+      tool_name: "Read",
+      input_chars: 6,
+      header_verb: "read",
+      header_target: "a.py",
+    };
+    const classes = collectClasses(renderToolCallBlock(call, null, "agent-x", "a-1"));
+    expect(classes).not.toContain("tool-call-reason");
   });
 
   it("keeps a failed call glanceable via the resident error snippet", () => {
     const call: ToolCall = { tool_call_id: "c3", tool_name: "Bash", input_chars: 6 };
-    const failed: ToolResultEvent = {
-      timestamp: "t",
-      type: "tool_result",
-      event_id: "r-c3",
-      source: "test",
-      tool_call_id: "c3",
-      tool_name: "Bash",
-      output_chars: 5000,
-      is_error: true,
-      error_snippet: "FileNotFoundError: no such file",
-    };
+    const failed = resultFor("c3", { is_error: true, error_snippet: "FileNotFoundError: no such file" });
     const text = allText(renderToolCallBlock(call, failed, "agent-x", "a-1"));
     expect(text).toContain("FileNotFoundError: no such file");
+  });
+
+  it("does not print a failure twice when it has both a snippet and a preview", () => {
+    const call: ToolCall = { tool_call_id: "c8", tool_name: "Bash", input_chars: 6 };
+    const failed = resultFor("c8", {
+      is_error: true,
+      error_snippet: "FileNotFoundError: no such file",
+      output_preview: "FileNotFoundError: no such file\n  at line 2",
+    });
+    const text = allText(renderToolCallBlock(call, failed, "agent-x", "a-1"));
+    expect(text.split("FileNotFoundError").length - 1).toBe(1);
   });
 });
 

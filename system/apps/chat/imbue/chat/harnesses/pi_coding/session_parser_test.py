@@ -51,7 +51,7 @@ def test_assistant_record_drops_thinking_and_keeps_text_and_tool_calls() -> None
     call = event["tool_calls"][0]
     assert call["tool_call_id"] == "toolu_1"
     assert call["tool_name"] == "bash"
-    assert call["header_label"] == "Tool: Bash"
+    assert call["header_label"] == "ran ls"
     assert call["caption_label"] == "Running ls"
 
 

@@ -45,8 +45,11 @@ const TOOLTIP_MARGIN = 6;
  * transition. The colour tokens don't flip with the scheme, so dark mode is
  * spelled out as `dark:` variants off `prefers-color-scheme`. `z-(--z-tooltip)`
  * clears the modal overlays. */
+// The cap only binds on a tooltip long enough to reach it -- a short label wraps
+// at its own natural width well below this -- so raising it affects only the few
+// tooltips carrying a sentence, where 480px left an orphan line of two words.
 const TOOLTIP_CLASS =
-  "hover-tooltip type-helper pointer-events-none fixed z-(--z-tooltip) hidden max-w-[480px] items-center gap-1.5 rounded-md bg-inverse px-2 py-1 text-center whitespace-normal text-on-accent shadow-overlay dark:bg-surface dark:text-primary";
+  "hover-tooltip type-helper pointer-events-none fixed z-(--z-tooltip) hidden max-w-[560px] items-center gap-1.5 rounded-md bg-inverse px-2 py-1 text-center whitespace-normal text-on-accent shadow-overlay dark:bg-surface dark:text-primary";
 
 export interface HoverTooltip {
   /** Set the text shown on hover, or ``null`` to disable the tooltip. */

@@ -812,7 +812,7 @@ export function MessageInput(): m.Component<{ agentId: string | null }> {
 
       return m(
         "div",
-        { class: "message-input mx-auto w-full max-w-[calc(var(--width-message-column)+2*var(--radius-xl))]" },
+        { class: "message-input mr-auto w-full max-w-[calc(var(--width-message-column)+2*var(--radius-xl))]" },
         [
           interceptedAuthCommand !== null ? renderAuthCommandNotice(interceptedAuthCommand) : null,
           declinedSlashCommand !== null ? renderDeclinedCommandNotice(declinedSlashCommand) : null,

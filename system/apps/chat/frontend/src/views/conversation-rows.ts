@@ -17,7 +17,7 @@
  */
 
 import m from "mithril";
-import type { TranscriptEvent, ToolResultEvent } from "../models/Response";
+import type { TranscriptEvent, ToolResultEvent, AssistantMessageEvent } from "../models/Response";
 import {
   renderUserMessage,
   renderAssistantMessage,
@@ -27,6 +27,7 @@ import {
 } from "./message-renderers";
 import { isHiddenUserMessage } from "./message-classification";
 import { buildSections, type SectionView } from "./turn-grouping";
+import { GROUPED_WORK_CLASS, groupedWorkEventIds } from "./work-grouping";
 import { ProgressBlock } from "./ProgressBlock";
 
 // Per-type fallback row heights, used until a row has been measured (live or
@@ -36,10 +37,11 @@ export const ESTIMATED_USER_HEIGHT_PX = 90;
 export const ESTIMATED_ASSISTANT_HEIGHT_PX = 240;
 export const ESTIMATED_PROGRESS_HEIGHT_PX = 360;
 
-// Layout for the centered message column. Shared by the live transcript views
-// and the offscreen measurer, whose rows must lay out identically to measure
-// identically.
-export const MESSAGE_LIST_CLASS = "message-list mx-auto w-full max-w-(--width-message-column) flex flex-col py-6";
+// Layout for the message column: LEFT-ALIGNED, capped at the reading width.
+// Shared by the live transcript views and the offscreen measurer, whose rows must
+// lay out identically to measure identically -- the offscreen measurer reads this
+// same constant, so the two cannot drift.
+export const MESSAGE_LIST_CLASS = "message-list mr-auto w-full max-w-(--width-message-column) flex flex-col py-6";
 
 export interface RowDescriptor {
   key: string;
@@ -94,6 +96,39 @@ export function renderTranscriptSegments(rows: RowDescriptor[], segments: Window
  * Every row's rendered root carries a DOM ``id`` equal to its ``key`` so
  * measureRows can read its height.
  */
+/** The DOM id of the container wrapping one agent turn. */
+export function agentTurnContainerId(anchorEventId: string): string {
+  return `turn-${anchorEventId}`;
+}
+
+/**
+ * The event the outline's agent entry for this turn points at: the first
+ * assistant message in the turn that actually says something.
+ *
+ * This MIRRORS the rule in imbue/chat/outline.py (`build_outline`) -- keep the two
+ * in step. They meet at the container id: the outline names an entry by that
+ * event, and the turn is wrapped in a container named after it, so the navigation
+ * rail has something to scroll to even when the message itself is inside a
+ * collapsed step and has no element of its own.
+ *
+ * A mismatch is not fatal: the rail falls back to the message element, which is
+ * exactly the behaviour it had before containers existed.
+ */
+export function agentTurnAnchorEventId(section: SectionView): string | null {
+  const speaks = (event: AssistantMessageEvent): boolean => Boolean(event.text && event.text.trim());
+  for (const item of section.items) {
+    if (item.kind === "step") {
+      for (const event of item.step.events) if (speaks(event)) return event.event_id;
+    } else if (item.kind === "ungrouped") {
+      for (const event of item.events) if (speaks(event)) return event.event_id;
+    } else if (item.kind === "permission") {
+      if (speaks(item.event)) return item.event.event_id;
+    }
+  }
+  for (const event of section.trailing_reply) if (speaks(event)) return event.event_id;
+  return null;
+}
+
 function buildRows(
   agentId: string,
   sections: SectionView[],
@@ -114,19 +149,35 @@ function buildRows(
     const hasSteps = section.items.some((i) => i.kind === "step");
     if (hasSteps) {
       const key = `progress-${section.key}`;
+      // The whole agent turn gets an outer container named after the event the
+      // outline points at. Inside a progress block most of the agent's prose is
+      // in a collapsed step and has no element of its own, so this container is
+      // what the navigation rail actually scrolls to. The row's own id stays on
+      // the block itself, where measureRows expects it.
+      const turnAnchorId = agentTurnAnchorEventId(section);
       rows.push({
         key,
         estimate: ESTIMATED_PROGRESS_HEIGHT_PX,
         anchorEventId: userEvent?.event_id ?? null,
-        render: () =>
-          m(ProgressBlock, {
-            id: key,
+        render: () => {
+          // The ROW's rendered root must carry the row key as its DOM id: the
+          // engine caches measured heights under `element.id` and reads them back
+          // under `row.key`, so a root with any other id leaves the row stuck on
+          // its crude estimate and the geometry the scroll position derives from
+          // goes badly wrong. When this row is wrapped, the wrapper IS the root,
+          // so the key goes there and the turn container id moves inside.
+          const block = m(ProgressBlock, {
+            id: turnAnchorId === null ? key : agentTurnContainerId(turnAnchorId),
             key,
             items: section.items,
             trailing_reply: section.trailing_reply,
             toolResults,
             agentId,
-          }),
+          });
+          // Keyed like every other row: these land in one children array, and
+          // mithril requires all-or-none keys among siblings.
+          return turnAnchorId === null ? block : m("div", { key, id: key, class: "agent-turn" }, block);
+        },
       });
       continue;
     }
@@ -135,12 +186,17 @@ function buildRows(
     // blocks inline, the same as assistant messages outside a progress section.
     for (const item of section.items) {
       if (item.kind === "ungrouped") {
+        // Work introduced by a sentence renders indented under it. The rows stay
+        // one-per-message so the virtualized list still measures them individually;
+        // only the indent marks the grouping (see work-grouping).
+        const grouped = groupedWorkEventIds(item.events);
         for (const event of item.events) {
+          const groupClass = grouped.has(event.event_id) ? GROUPED_WORK_CLASS : "";
           rows.push({
             key: event.event_id,
             estimate: ESTIMATED_ASSISTANT_HEIGHT_PX,
             anchorEventId: event.event_id,
-            render: () => renderAssistantMessage(event, toolResults, agentId),
+            render: () => renderAssistantMessage(event, toolResults, agentId, groupClass),
           });
         }
       } else if (item.kind === "permission") {

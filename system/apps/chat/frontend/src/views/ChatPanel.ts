@@ -29,6 +29,10 @@ import {
 } from "../models/Response";
 import type { FillAction } from "../models/transcriptScroll/fillPlanner";
 import { createTranscriptScrollEngine } from "./transcript-scroll-engine";
+import { TranscriptOutline } from "./TranscriptOutline";
+import { AgentOverviewModal } from "./AgentOverviewModal";
+import { openAgentOverview } from "../models/Overview";
+import { ensureOutline } from "../models/Outline";
 import { TranscriptScrollbar } from "./TranscriptScrollbar";
 import { connectToStream, disconnectFromStream, loadSnapshotWithStream } from "../models/StreamingMessage";
 import {
@@ -113,6 +117,9 @@ export function ChatPanel(): m.Component<{ agentId: string; isVisible?: boolean 
   // while it is false.
   // Defaults to true so the panel works before the first render sets it.
   let panelVisible = true;
+  // The transcript's scroll container, handed to the navigation rail so it can
+  // follow the same scrolling the engine drives.
+  let transcriptElement: HTMLElement | null = null;
   // Memoized turn-grouping output. buildSections walks the whole held
   // transcript, so it is recomputed only when the data actually changes (keyed
   // on the render version + idle flag), not on every scroll-driven redraw.
@@ -691,6 +698,11 @@ export function ChatPanel(): m.Component<{ agentId: string; isVisible?: boolean 
 
       const content = isSlotClaimed("conversation-content") ? null : renderMessages(agentId);
 
+      // Refresh the navigation rail when the conversation has grown. Cheap to call
+      // every frame: it no-ops unless the newest event changed.
+      const loadedEvents = getEventsForAgent(agentId);
+      ensureOutline(agentId, loadedEvents.length > 0 ? loadedEvents[loadedEvents.length - 1].event_id : null);
+
       const acceptsFileDrops = hasComposer(agentId) && !isConversationNotFound(agentId);
 
       // The two renderings of one conversation. `hasEverFlipped` is STICKY and separate from
@@ -732,118 +744,147 @@ export function ChatPanel(): m.Component<{ agentId: string; isVisible?: boolean 
                 ),
               )
             : null,
-          chatFlipCard({
-            flipped: isFlipped,
-            everFlipped: hasEverFlipped,
-            back: () =>
-              m(AgentTerminalPanel, {
-                agentId,
-                url: getAgentTerminalUrl(agentId),
-                title: `${getAgentById(agentId)?.name ?? "agent"} terminal`,
-              }),
-            front: [
-              // The transcript area: the scroll container (native scrolling, native
-              // scrollbar hidden), the custom overlay scrollbar, and the
-              // loading-overlay for when the viewport sits over a virtual end spacer.
-              m("div", { class: "chat-transcript-area relative flex-1 min-h-0 flex flex-col" }, [
-                m(
-                  "main",
-                  {
-                    class: "app-content transcript-scroll flex-1 overflow-y-auto bg-chat px-8 py-6",
-                    // Focusable so native keyboard scrolling (PageUp/Down, Home/End)
-                    // works; the engine's listeners classify the input source.
-                    tabindex: 0,
-                    oncreate: (mainVnode: m.VnodeDOM) => {
-                      engine.afterRender(mainVnode.dom as HTMLElement);
-                    },
-                    onupdate: (mainVnode: m.VnodeDOM) => {
-                      engine.afterRender(mainVnode.dom as HTMLElement);
-                    },
-                  },
-                  content,
-                ),
-                m(TranscriptScrollbar, { engine }),
-                // While the viewport is over a virtual end spacer (e.g. the scrollbar
-                // was dragged into not-yet-loaded history), overlay a loading indicator
-                // so the user never sees a blank area. pointer-events:none so it never
-                // blocks scroll.
-                engine.isViewportInSpacer()
-                  ? m(
-                      "div",
+          // The pane is a ROW: the conversation index runs the full height on the
+          // left, and everything else -- transcript, composer, under-bar -- is a
+          // column beside it. The index sits OUTSIDE the flip card for the same
+          // reason the under-bar does: it describes the conversation rather than
+          // either rendering of it, so it must not rotate away with a face.
+          m("div", { class: "chat-body flex flex-1 min-h-0" }, [
+            m(TranscriptOutline, { agentId, engine, getScrollElement: () => transcriptElement }),
+            m("div", { class: "chat-column flex flex-1 flex-col min-h-0" }, [
+              chatFlipCard({
+                flipped: isFlipped,
+                everFlipped: hasEverFlipped,
+                back: () =>
+                  m(AgentTerminalPanel, {
+                    agentId,
+                    url: getAgentTerminalUrl(agentId),
+                    title: `${getAgentById(agentId)?.name ?? "agent"} terminal`,
+                  }),
+                front: [
+                  // The transcript area: the scroll container (native scrolling, native
+                  // scrollbar hidden), the custom overlay scrollbar, and the
+                  // loading-overlay for when the viewport sits over a virtual end spacer.
+                  m("div", { class: "chat-transcript-area relative flex-1 min-h-0 flex flex-col" }, [
+                    m(
+                      "main",
                       {
-                        class:
-                          "message-list-window-loading absolute inset-0 flex items-center justify-center p-6 pointer-events-none",
+                        class: "app-content transcript-scroll flex-1 overflow-y-auto bg-chat px-8 py-6",
+                        // Focusable so native keyboard scrolling (PageUp/Down, Home/End)
+                        // works; the engine's listeners classify the input source.
+                        tabindex: 0,
+                        oncreate: (mainVnode: m.VnodeDOM) => {
+                          transcriptElement = mainVnode.dom as HTMLElement;
+                          engine.afterRender(transcriptElement);
+                        },
+                        onupdate: (mainVnode: m.VnodeDOM) => {
+                          transcriptElement = mainVnode.dom as HTMLElement;
+                          engine.afterRender(transcriptElement);
+                        },
                       },
-                      m("p", { class: "text-secondary" }, "Loading messages..."),
-                    )
-                  : null,
-              ]),
-              // Present while there is an agent to reach, a create in flight included: a message
-              // typed while the chat is being created is held and delivered when it lands.
+                      content,
+                    ),
+                    m(TranscriptScrollbar, { engine }),
+                    // While the viewport is over a virtual end spacer (e.g. the scrollbar
+                    // was dragged into not-yet-loaded history), overlay a loading indicator
+                    // so the user never sees a blank area. pointer-events:none so it never
+                    // blocks scroll.
+                    engine.isViewportInSpacer()
+                      ? m(
+                          "div",
+                          {
+                            class:
+                              "message-list-window-loading absolute inset-0 flex items-center justify-center p-6 pointer-events-none",
+                          },
+                          m("p", { class: "text-secondary" }, "Loading messages..."),
+                        )
+                      : null,
+                  ]),
+                  // Present while there is an agent to reach, a create in flight included: a message
+                  // typed while the chat is being created is held and delivered when it lands.
+                  !hasComposer(agentId)
+                    ? null
+                    : m("footer", { class: "app-footer shrink-0 bg-chat px-8" }, [
+                        m(EmptySlot, { name: "conversation-before-input" }),
+                        isConversationNotFound(agentId)
+                          ? null
+                          : m(ActivityIndicator, {
+                              agentId,
+                              events: getEventsForAgent(agentId),
+                            }),
+                        m(MessageInput, { agentId }),
+                        // The under-bar is a sibling of the whole flip card, not part of this face: on
+                        // a face it would rotate away with the face its own switch turns, and the flip
+                        // would be one-way.
+                      ]),
+                ],
+              }),
+              // OUTSIDE the flip. Inside, the switch would rotate away with the face it turns and
+              // the flip would be one-way. Everything here describes the conversation rather than
+              // either rendering of it, which is the same reason it belongs to neither face.
+              // Carries the bottom gutter the footer used to supply, so the 24px sits under the
+              // under-bar rather than between the composer and it.
               !hasComposer(agentId)
                 ? null
-                : m("footer", { class: "app-footer shrink-0 bg-chat px-8" }, [
-                    m(EmptySlot, { name: "conversation-before-input" }),
-                    isConversationNotFound(agentId)
-                      ? null
-                      : m(ActivityIndicator, {
-                          agentId,
-                          events: getEventsForAgent(agentId),
-                        }),
-                    m(MessageInput, { agentId }),
-                    // The under-bar is a sibling of the whole flip card, not part of this face: on
-                    // a face it would rotate away with the face its own switch turns, and the flip
-                    // would be one-way.
-                  ]),
-            ],
-          }),
-          // OUTSIDE the flip. Inside, the switch would rotate away with the face it turns and
-          // the flip would be one-way. Everything here describes the conversation rather than
-          // either rendering of it, which is the same reason it belongs to neither face.
-          // Carries the bottom gutter the footer used to supply, so the 24px sits under the
-          // under-bar rather than between the composer and it.
-          !hasComposer(agentId)
-            ? null
-            : m(
-                "div",
-                { class: "chat-under-bar shrink-0 bg-chat px-8 pb-6" },
-                m(
-                  "div",
-                  {
-                    // Same max-width as the composer card above it; relative as
-                    // the containing block for centered overlays.
-                    class:
-                      "composer-under-bar relative mx-auto mt-1 flex w-full " +
-                      "max-w-[calc(var(--width-message-column)+2*var(--radius-xl))] items-center gap-2 px-1",
-                  },
-                  [
-                    m(ModelBar, { agentId }),
-                    // The terminal back face attaches to the agent's own tmux session, which
-                    // a chat still being created does not have: without a name the terminal
-                    // dispatch attaches to whatever session it finds, so the flip waits for
-                    // the agent to register.
-                    getAgentById(agentId) === undefined
-                      ? null
-                      : m("div", { class: "composer-under-bar-actions ml-auto flex items-center gap-0.5" }, [
-                          m(TerminalViewToggle, {
-                            on: isFlipped,
-                            onToggle: (event: Event) => {
-                              isFlipped = !isFlipped;
-                              // Turning the card over is the user navigating TO the terminal,
-                              // so the host grants it focus -- the embedded ttyd client never
-                              // takes focus on its own (see terminalFocus.ts). Redraw first so
-                              // a first flip has mounted the back face before the ask.
-                              if (isFlipped) {
-                                const panel = (event.currentTarget as HTMLElement | null)?.closest?.(".chat-panel");
-                                m.redraw.sync();
-                                requestFrameFocus(panel?.querySelector?.(".chat-flip-back") ?? null);
-                              }
-                            },
-                          }),
-                        ]),
-                  ],
-                ),
-              ),
+                : m(
+                    "div",
+                    { class: "chat-under-bar shrink-0 bg-chat px-8 pb-6" },
+                    m(
+                      "div",
+                      {
+                        // Same max-width as the composer card above it; relative as
+                        // the containing block for centered overlays.
+                        class:
+                          "composer-under-bar relative mr-auto mt-1 flex w-full " +
+                          "max-w-[calc(var(--width-message-column)+2*var(--radius-xl))] items-center gap-2 px-1",
+                      },
+                      [
+                        m(ModelBar, { agentId }),
+                        // Next to the model and effort: those say how this agent is
+                        // running, and the overview says what that has cost so far.
+                        m(
+                          "button",
+                          {
+                            type: "button",
+                            class:
+                              "agent-overview-link shrink-0 cursor-pointer bg-transparent " +
+                              "text-(length:--font-size-helper) text-secondary underline decoration-dotted " +
+                              "underline-offset-2 hover:text-primary",
+                            onclick: () => openAgentOverview(agentId),
+                          },
+                          "Agent Overview",
+                        ),
+                        // The terminal back face attaches to the agent's own tmux session, which
+                        // a chat still being created does not have: without a name the terminal
+                        // dispatch attaches to whatever session it finds, so the flip waits for
+                        // the agent to register.
+                        getAgentById(agentId) === undefined
+                          ? null
+                          : m("div", { class: "composer-under-bar-actions ml-auto flex items-center gap-0.5" }, [
+                              m(TerminalViewToggle, {
+                                on: isFlipped,
+                                onToggle: (event: Event) => {
+                                  isFlipped = !isFlipped;
+                                  // Turning the card over is the user navigating TO the terminal,
+                                  // so the host grants it focus -- the embedded ttyd client never
+                                  // takes focus on its own (see terminalFocus.ts). Redraw first so
+                                  // a first flip has mounted the back face before the ask.
+                                  if (isFlipped) {
+                                    const panel = (event.currentTarget as HTMLElement | null)?.closest?.(
+                                      ".chat-panel",
+                                    );
+                                    m.redraw.sync();
+                                    requestFrameFocus(panel?.querySelector?.(".chat-flip-back") ?? null);
+                                  }
+                                },
+                              }),
+                            ]),
+                      ],
+                    ),
+                  ),
+            ]),
+          ]),
+          m(AgentOverviewModal),
         ],
       );
     },
